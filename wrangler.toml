@@ -1,0 +1,28 @@
+name = "opencode-server"
+main = "src/index.ts"
+compatibility_date = "2025-01-14"
+
+[[containers]]
+class_name = "OpenCodeContainer"
+image = "./Dockerfile"
+max_instances = 1  # Single shared instance
+instance_type = "standard-2"  # 1 vCPU, 6GB RAM
+
+[[durable_objects.bindings]]
+name = "OPENCODE_CONTAINER"
+class_name = "OpenCodeContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OpenCodeContainer"]
+
+[vars]
+# Git repos to clone on startup (comma-separated)
+# Update this with your actual repos
+GIT_REPOS = ""
+
+# Secrets (set via wrangler secret put):
+# - OPENCODE_SERVER_PASSWORD (required for OpenCode server auth)
+# - OPENCODE_API_KEY (OpenCode Zen API key - get from https://opencode.ai/auth)
+# - ADMIN_PASSWORD (optional, for admin UI - defaults to OPENCODE_SERVER_PASSWORD)
+# - GIT_TOKEN (optional, for private repos)
