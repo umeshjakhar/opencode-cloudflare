@@ -324,7 +324,6 @@ export function getAdminHTML(): string {
         configDiv.innerHTML = '<p class="text-red-400">Error: ' + data.error + '</p>';
         return;
       }
-      
       configDiv.innerHTML = \`
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div class="bg-gray-900/50 rounded-lg p-4">
@@ -406,6 +405,7 @@ export function getAdminHTML(): string {
           </div>
         </div>
       \`;
+      loadOpenCodeConfig();
     }
     
     const SLEEP_PRESETS = ['10m', '30m', '1h', '6h', '24h'];
@@ -591,7 +591,6 @@ export function getAdminHTML(): string {
     refreshStatus();
     refreshConfig();
     refreshPower();
-    loadOpenCodeConfig();
     startAutoRefresh();
     
     // Refresh on visibility change
@@ -600,7 +599,6 @@ export function getAdminHTML(): string {
         refreshStatus();
         refreshConfig();
         refreshPower();
-        loadOpenCodeConfig();
       }
     });
   </script>
