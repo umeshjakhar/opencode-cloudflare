@@ -28,33 +28,47 @@ Run OpenCode as a persistent web server on Cloudflare Containers, powered by **O
 npm install
 ```
 
-### 2. Get your OpenCode Zen API key
+### 2. Credentials reference
 
-1. Go to [opencode.ai/auth](https://opencode.ai/auth)
-2. Sign in and add billing details
-3. Create and copy your API key
+The table below lists every credential this project uses. Set the required ones as **Workers secrets** (step 3). Never commit them to the repo.
+
+| Credential | Required | What it is | How to get it |
+|---|---|---|---|
+| `OPENCODE_API_KEY` | **Yes** | OpenCode Zen API key — billed for LLM usage | 1. Go to [opencode.ai/auth](https://opencode.ai/auth) <br> 2. Sign in and add billing details <br> 3. Create a key and copy it (starts with `sk-`) |
+| `OPENCODE_SERVER_PASSWORD` | **Yes** | Password for the OpenCode web UI (username `opencode`) | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `ADMIN_PASSWORD` | No | Password for `/admin` dashboard (username `admin`). Defaults to `OPENCODE_SERVER_PASSWORD` if unset | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `GIT_TOKEN` | Only for private repos | GitHub Personal Access Token used to clone private `GIT_REPOS` | 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) <br> 2. "Generate new token" → "Fine-grained" <br> 3. Grant **Contents: Read-only** on the repos you want to clone <br> 4. Copy the token (starts with `github_pat_` or `ghp_`) |
+| `GIT_REPOS` | No | Comma-separated repo URLs cloned on container start. **Not a secret** — set as a `[vars]` in `wrangler.toml` | Use `https://` URLs. For private repos, auth is handled by `GIT_TOKEN` |
+
+> **Note:** Cloudflare secrets are stored encrypted and only exposed inside the container at runtime — the worker itself never returns their values (`/admin/api/config` only reports whether each is set).
 
 ### 3. Configure secrets
 
-Set the required secrets using Wrangler:
+Set the required secrets using Wrangler (each command prompts for input):
 
 ```bash
-# Required: Server password for HTTP Basic Auth
-wrangler secret put OPENCODE_SERVER_PASSWORD
-
 # Required: OpenCode Zen API key
 wrangler secret put OPENCODE_API_KEY
 
-# Optional: GitHub token for private repos
-wrangler secret put GIT_TOKEN
+# Required: Server password for HTTP Basic Auth
+wrangler secret put OPENCODE_SERVER_PASSWORD
 
 # Optional: Separate admin password (defaults to OPENCODE_SERVER_PASSWORD)
 wrangler secret put ADMIN_PASSWORD
+
+# Optional: GitHub token for private repos
+wrangler secret put GIT_TOKEN
+```
+
+Verify all secrets were stored:
+
+```bash
+wrangler secret list
 ```
 
 ### 4. Configure git repos (optional)
 
-Edit `wrangler.toml` and set the `GIT_REPOS` variable with comma-separated repo URLs:
+Edit `wrangler.toml` and set the `GIT_REPOS` variable with comma-separated repo URLs (this is a plain var, not a secret):
 
 ```toml
 [vars]
