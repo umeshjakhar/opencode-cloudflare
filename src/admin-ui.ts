@@ -159,6 +159,25 @@ export function getAdminHTML(): string {
       </div>
     </div>
 
+    <!-- Billing & Usage -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Billing &amp; Usage</h2>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-400">Last 30 days</span>
+          <button 
+            onclick="refreshBilling()" 
+            class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div id="billing" class="space-y-4">
+        <p class="text-gray-400">Loading billing data...</p>
+      </div>
+    </div>
+
     <!-- Quick Links -->
     <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
       <h2 class="text-xl font-semibold mb-4">Quick Links</h2>
@@ -581,6 +600,93 @@ export function getAdminHTML(): string {
       }, 10000);
     }
     
+    async function refreshBilling() {
+      const data = await fetchAPI('/billing');
+      const div = document.getElementById('billing');
+
+      if (data.error) {
+        div.innerHTML = \`
+          <div class="bg-red-900/30 border border-red-700 rounded p-3">
+            <p class="text-red-400 font-medium">Error fetching billing data</p>
+            <p class="text-red-300 text-sm mt-1">\${data.error}</p>
+          </div>
+        \`;
+        return;
+      }
+
+      const currency = data.currency || 'USD';
+      const fmtMoney = (n) => \`\${currency} \${Number(n || 0).toFixed(4)}\`;
+
+      const r2Block = data.r2Usage ? \`
+        <div class="flex justify-between">
+          <span class="text-gray-400">R2 storage:</span>
+          <span class="text-gray-300">\${data.r2Usage.payloadSizeFormatted} (\${data.r2Usage.objectCount} objects)</span>
+        </div>
+      \` : '';
+
+      const workerBlock = data.workerStats ? \`
+        <div class="flex justify-between">
+          <span class="text-gray-400">Worker requests:</span>
+          <span class="text-gray-300">\${data.workerStats.requests.toLocaleString()} (\${data.workerStats.errors} errors, p50 CPU \${data.workerStats.cpuTimeP50Ms}ms)</span>
+        </div>
+      \` : '';
+
+      const serviceRows = (data.services || []).map(s => \`
+        <div class="flex justify-between text-sm">
+          <div class="min-w-0 pr-3">
+            <p class="text-gray-300 truncate" title="\${s.name}">\${s.name}</p>
+            <p class="text-xs text-gray-500">\${s.consumedFormatted} \${s.unit}</p>
+          </div>
+          <span class="\${s.billedCost > 0 ? 'text-yellow-400 font-medium' : 'text-gray-500'} whitespace-nowrap">\${fmtMoney(s.billedCost)}</span>
+        </div>
+      \`).join('');
+
+      div.innerHTML = \`
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="bg-gray-900/50 rounded-lg p-4">
+            <h3 class="font-medium mb-3 text-gray-300">Estimated Cost</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="text-gray-400">Total billed (30d):</span>
+                <span class="text-lg font-bold \${data.totalBilled > 0 ? 'text-yellow-400' : 'text-green-400'}">\${fmtMoney(data.totalBilled)}</span>
+              </div>
+              \${r2Block}
+              \${workerBlock}
+            </div>
+          </div>
+
+          <div class="bg-gray-900/50 rounded-lg p-4">
+            <h3 class="font-medium mb-3 text-gray-300">Free Tier (per month)</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="text-gray-400">Containers:</span>
+                <span class="text-gray-300">375 vCPU-min</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-400">Memory:</span>
+                <span class="text-gray-300">25 GiB-hours</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-400">Workers CPU:</span>
+                <span class="text-gray-300">30M ms</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-gray-400">R2 storage:</span>
+                <span class="text-gray-300">10 GB</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-gray-900/50 rounded-lg p-4 mt-4">
+          <h3 class="font-medium mb-3 text-gray-300">Service Breakdown</h3>
+          <div class="space-y-2">
+            \${serviceRows}
+          </div>
+        </div>
+      \`;
+    }
+
     // Start auto-refresh
     function startAutoRefresh() {
       if (autoRefreshInterval) clearInterval(autoRefreshInterval);
@@ -591,6 +697,7 @@ export function getAdminHTML(): string {
     refreshStatus();
     refreshConfig();
     refreshPower();
+    refreshBilling();
     startAutoRefresh();
     
     // Refresh on visibility change
@@ -599,6 +706,7 @@ export function getAdminHTML(): string {
         refreshStatus();
         refreshConfig();
         refreshPower();
+        refreshBilling();
       }
     });
   </script>

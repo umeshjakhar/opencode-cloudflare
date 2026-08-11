@@ -15,6 +15,7 @@ interface Env {
   R2_BUCKET_NAME?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
+  CF_API_TOKEN?: string;
 }
 
 const SLEEP_AFTER_KEY = "sleepAfter";
@@ -541,6 +542,195 @@ app.post("/admin/api/opencode-config", async (c) => {
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }
+});
+
+// Billing & usage insights (uses CF_API_TOKEN secret, requires Billing Read)
+const CF_API_BASE = "https://api.cloudflare.com/client/v4";
+
+interface BillingRow {
+  ServiceName: string;
+  ServiceFamilyName: string;
+  ChargeCategory: string;
+  ConsumedUnit: string;
+  ConsumedQuantity: number;
+  PricingUnit: string;
+  PricingQuantity: number;
+  BilledCost: number;
+  BillingCurrency: string;
+}
+
+function fmtQty(value: number): string {
+  if (Math.abs(value) >= 1_000_000) {
+    return (value / 1_000_000).toFixed(2) + "M";
+  }
+  if (Math.abs(value) >= 1_000) {
+    return (value / 1_000).toFixed(2) + "k";
+  }
+  return value.toFixed(value < 10 ? 2 : 0);
+}
+
+function fmtBytes(bytes: number): string {
+  if (bytes === 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return (bytes / Math.pow(1024, i)).toFixed(2) + " " + units[i];
+}
+
+app.get("/admin/api/billing", async (c) => {
+  const token = c.env.CF_API_TOKEN;
+  if (!token) {
+    return c.json({ error: "CF_API_TOKEN secret not set. See README." }, 400);
+  }
+  const accountId = c.env.R2_ACCOUNT_ID;
+  if (!accountId) {
+    return c.json({ error: "R2_ACCOUNT_ID not set" }, 400);
+  }
+
+  const now = new Date();
+  const to = now.toISOString();
+  const from = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+  };
+
+  // 1. Billable usage (billed cost + quantities)
+  let billableUsage: BillingRow[] = [];
+  try {
+    const url = `${CF_API_BASE}/accounts/${accountId}/billable-usage?from=${encodeURIComponent(
+      from
+    )}&to=${encodeURIComponent(to)}`;
+    const res = await fetch(url, { headers: authHeaders });
+    const data = (await res.json()) as any;
+    if (res.ok && data.success && Array.isArray(data.result)) {
+      billableUsage = data.result as BillingRow[];
+    } else {
+      return c.json(
+        {
+          error: `Billable usage API failed: ${
+            data?.errors?.[0]?.message || res.statusText
+          }`,
+        },
+        502
+      );
+    }
+  } catch (e) {
+    return c.json({ error: `Billable usage error: ${(e as Error).message}` }, 502);
+  }
+
+  // Aggregate rows by service, summing consumed quantity and billed cost
+  const byService = new Map<string, {
+    name: string;
+    family: string;
+    unit: string;
+    consumed: number;
+    billedCost: number;
+    currency: string;
+  }>();
+
+  for (const row of billableUsage) {
+    const key = `${row.ServiceFamilyName}::${row.ServiceName}`;
+    const existing = byService.get(key);
+    if (existing) {
+      existing.consumed += row.ConsumedQuantity || 0;
+      existing.billedCost += row.BilledCost || 0;
+    } else {
+      byService.set(key, {
+        name: row.ServiceName,
+        family: row.ServiceFamilyName,
+        unit: row.ConsumedUnit || "count",
+        consumed: row.ConsumedQuantity || 0,
+        billedCost: row.BilledCost || 0,
+        currency: row.BillingCurrency || "USD",
+      });
+    }
+  }
+
+  const services = [...byService.values()]
+    .map((s) => ({
+      ...s,
+      consumedFormatted: fmtQty(s.consumed),
+      billedCost: Math.round(s.billedCost * 10000) / 10000,
+    }))
+    .sort((a, b) => b.billedCost - a.billedCost || b.consumed - a.consumed);
+
+  const totalBilled = Math.round(
+    services.reduce((sum, s) => sum + s.billedCost, 0) * 10000
+  ) / 10000;
+  const currency = services[0]?.currency || "USD";
+
+  // 2. R2 bucket usage
+  let r2Usage: Record<string, string> | null = null;
+  try {
+    const bucket = c.env.R2_BUCKET_NAME;
+    if (bucket) {
+      const url = `${CF_API_BASE}/accounts/${accountId}/r2/buckets/${bucket}/usage`;
+      const res = await fetch(url, { headers: authHeaders });
+      const data = (await res.json()) as any;
+      if (res.ok && data.success && data.result) {
+        r2Usage = data.result;
+      }
+    }
+  } catch {
+    // r2 usage is optional
+  }
+
+  // 3. Workers invocations + errors via GraphQL
+  let workerStats: Record<string, unknown> | null = null;
+  try {
+    const query = `{
+      viewer {
+        accounts(filter: { accountTag: "${accountId}" }) {
+          workersInvocationsAdaptive(
+            limit: 1
+            filter: { datetimeMinute_geq: "${from}", datetimeMinute_leq: "${to}" }
+          ) {
+            sum { requests errors subrequests }
+            quantiles { cpuTimeP50 }
+          }
+        }
+      }
+    }`;
+    const res = await fetch(`${CF_API_BASE}/graphql`, {
+      method: "POST",
+      headers: { ...authHeaders, "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    const data = (await res.json()) as any;
+    const row = data?.data?.viewer?.accounts?.[0]?.workersInvocationsAdaptive?.[0];
+    if (row) {
+      workerStats = {
+        requests: row.sum?.requests ?? 0,
+        errors: row.sum?.errors ?? 0,
+        subrequests: row.sum?.subrequests ?? 0,
+        cpuTimeP50Ms: row.quantiles?.cpuTimeP50 ?? 0,
+      };
+    }
+  } catch {
+    // worker stats are optional
+  }
+
+  return c.json({
+    period: { from, to },
+    totalBilled,
+    currency,
+    services,
+    r2Usage: r2Usage
+      ? {
+          payloadSizeBytes: Number(r2Usage.payloadSize) || 0,
+          payloadSizeFormatted: fmtBytes(Number(r2Usage.payloadSize) || 0),
+          objectCount: Number(r2Usage.objectCount) || 0,
+          uploadCount: Number(r2Usage.uploadCount) || 0,
+        }
+      : null,
+    workerStats,
+    freeTierNotes: {
+      container: "First 375 vCPU-min + 25 GiB-hours memory / month",
+      workers: "First 30M CPU ms / month",
+      r2: "First 10 GB storage / month",
+      d1: "First 5 GB / month",
+    },
+  });
 });
 
 // Default route - proxy all other requests to container (OpenCode server)
