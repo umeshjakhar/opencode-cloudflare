@@ -493,6 +493,7 @@ app.post("/admin/api/keepwarm", async (c) => {
 });
 
 const OPENCODE_CONFIG_KEY = "opencode-config/opencode.json";
+const CONTAINER_METRICS_KEY = ".container-metrics.json";
 
 const DEFAULT_OPENCODE_CONFIG = `{
   "$schema": "https://opencode.ai/config.json",
@@ -700,6 +701,29 @@ app.post("/admin/api/instance-type", async (c) => {
     rolloutId: rolloutData.result?.id,
     instanceType: valid.name,
   });
+});
+
+// Live container workload (CPU / RAM / disk). The container's startup.sh
+// writes a small JSON to R2 (.container-metrics.json) every 5s.
+app.get("/admin/api/container-metrics", async (c) => {
+  const bucket = c.env.OPENCODE_CONFIG_R2;
+  if (!bucket) {
+    return c.json({ error: "R2 storage not configured" }, 400);
+  }
+  try {
+    const obj = await bucket.get(CONTAINER_METRICS_KEY);
+    if (!obj) {
+      return c.json({
+        available: false,
+        reason: "Metrics file not found in R2. Container metrics collector may not be running yet (waits 10s after boot).",
+      });
+    }
+    const text = await obj.text();
+    const parsed = JSON.parse(text);
+    return c.json({ available: true, ...parsed });
+  } catch (e) {
+    return c.json({ error: e instanceof Error ? e.message : "Unknown error" }, 500);
+  }
 });
 
 // Billing & usage insights (uses CF_API_TOKEN secret, requires Billing Read)

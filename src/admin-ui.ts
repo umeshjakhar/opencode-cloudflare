@@ -46,9 +46,23 @@ export function getAdminHTML(): string {
           <div class="w-4 h-4 rounded-full bg-gray-600 animate-pulse"></div>
           <span class="text-gray-400">Loading status...</span>
         </div>
+</div>
+    </div>
+
+    <!-- Live Workload -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Live Workload</h2>
+        <div class="flex items-center gap-3">
+          <span id="metrics-timestamp" class="text-xs text-gray-500">no data</span>
+          <button onclick="refreshMetrics()" class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors">Refresh</button>
+        </div>
+      </div>
+      <div id="metrics" class="space-y-4">
+        <p class="text-gray-400">Loading container metrics...</p>
       </div>
     </div>
-    
+
     <!-- Controls -->
     <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
       <h2 class="text-xl font-semibold mb-4">Container Controls</h2>
@@ -822,6 +836,73 @@ export function getAdminHTML(): string {
       autoRefreshInterval = setInterval(refreshStatus, 30000); // Every 30 seconds
     }
 
+    function metricsBar(percent, color) {
+      const p = Math.max(0, Math.min(100, percent || 0));
+      const colorClass = p >= 90 ? 'bg-red-500' : p >= 70 ? 'bg-yellow-500' : color;
+      return '<div class="relative h-3 rounded-full bg-gray-700/60 overflow-hidden border border-gray-700">'
+        + '<div class="absolute h-full ' + colorClass + ' rounded-full transition-all" style="width:' + p.toFixed(1) + '%"></div>'
+        + '</div>'
+        + '<div class="text-xs text-gray-400 mt-1 flex justify-between"><span>' + p.toFixed(1) + '%</span><span class="text-gray-500">of limit</span></div>';
+    }
+
+    function fmtUptime(sec) {
+      sec = Math.floor(sec || 0);
+      const days = Math.floor(sec / 86400);
+      sec -= days * 86400;
+      const h = Math.floor(sec / 3600);
+      sec -= h * 3600;
+      const m = Math.floor(sec / 60);
+      sec -= m * 60;
+      if (days > 0) return days + 'd ' + h + 'h';
+      if (h > 0) return h + 'h ' + m + 'm';
+      if (m > 0) return m + 'm ' + sec + 's';
+      return sec + 's';
+    }
+
+    async function refreshMetrics() {
+      const data = await fetchAPI('/container-metrics');
+      const div = document.getElementById('metrics');
+      const tsSpan = document.getElementById('metrics-timestamp');
+      if (data.error) {
+        div.innerHTML = '<p class="text-red-400">' + data.error + '</p>';
+        if (tsSpan) tsSpan.textContent = 'error';
+        return;
+      }
+      if (!data.available) {
+        div.innerHTML = '<p class="text-gray-400 text-sm">' + (data.reason || 'Metrics not available yet.') + '</p>';
+        if (tsSpan) tsSpan.textContent = 'no data';
+        return;
+      }
+      const ago = Math.max(0, Math.floor(Date.now() / 1000) - (data.timestamp || 0));
+      if (tsSpan) tsSpan.textContent = ago < 2 ? 'just now' : ago + 's ago';
+      const cpu = data.cpu || {};
+      const mem = data.memory || {};
+      const disk = data.disk || {};
+      div.innerHTML = '<div class="grid grid-cols-1 md:grid-cols-3 gap-4">'
+        + '<div class="bg-gray-900/50 rounded-lg p-4">'
+        + '<div class="flex items-center justify-between mb-2"><h3 class="text-sm font-medium text-gray-300">CPU</h3><span class="text-xs text-gray-500">5s avg</span></div>'
+        + metricsBar(cpu.percent, 'bg-blue-500')
+        + '</div>'
+        + '<div class="bg-gray-900/50 rounded-lg p-4">'
+        + '<div class="flex items-center justify-between mb-2"><h3 class="text-sm font-medium text-gray-300">Memory</h3><span class="text-xs text-gray-500">' + (mem.usedMB || 0).toFixed(0) + ' / ' + (mem.totalMB || 0) + ' MB</span></div>'
+        + metricsBar(mem.percent, 'bg-green-500')
+        + '</div>'
+        + '<div class="bg-gray-900/50 rounded-lg p-4">'
+        + '<div class="flex items-center justify-between mb-2"><h3 class="text-sm font-medium text-gray-300">Disk (rootfs)</h3><span class="text-xs text-gray-500">' + ((disk.usedBytes / 1073741824) || 0).toFixed(2) + ' / ' + ((disk.totalBytes / 1073741824) || 0).toFixed(2) + ' GB</span></div>'
+        + metricsBar(disk.percent, 'bg-purple-500')
+        + '</div>'
+        + '</div>'
+        + '<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">'
+        + '<div class="bg-gray-900/50 rounded p-3"><p class="text-gray-400 text-xs">Load avg</p><p class="font-mono text-gray-200">' + (data.load || '-') + '</p></div>'
+        + '<div class="bg-gray-900/50 rounded p-3"><p class="text-gray-400 text-xs">Processes</p><p class="font-mono text-gray-200">' + (data.processCount || 0) + '</p></div>'
+        + '<div class="bg-gray-900/50 rounded p-3"><p class="text-gray-400 text-xs">Uptime</p><p class="font-mono text-gray-200">' + fmtUptime(data.uptimeSeconds) + '</p></div>'
+        + '<div class="bg-gray-900/50 rounded p-3"><p class="text-gray-400 text-xs">Updated</p><p class="font-mono text-gray-200">' + ago + 's ago</p></div>'
+        + '</div>';
+    }
+
+    // Auto-refresh metrics every 6 seconds (container writes every 5s)
+    setInterval(refreshMetrics, 6000);
+
     async function refreshInstanceType() {
       const div = document.getElementById('instance-type');
       const data = await fetchAPI('/instance-type');
@@ -898,6 +979,7 @@ export function getAdminHTML(): string {
     refreshPower();
     refreshBilling();
     refreshInstanceType();
+    refreshMetrics();
     startAutoRefresh();
 
     // Refresh on visibility change
@@ -908,6 +990,7 @@ export function getAdminHTML(): string {
         refreshPower();
         refreshBilling();
         refreshInstanceType();
+        refreshMetrics();
       }
     });
   </script>
