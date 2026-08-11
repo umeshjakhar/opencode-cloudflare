@@ -566,7 +566,9 @@ function fmtQty(value: number): string {
   if (Math.abs(value) >= 1_000) {
     return (value / 1_000).toFixed(2) + "k";
   }
-  return value.toFixed(value < 10 ? 2 : 0);
+  if (value === 0) return "0";
+  if (value < 0.01) return value.toFixed(4);
+  return value.toFixed(2);
 }
 
 function fmtBytes(bytes: number): string {
@@ -646,38 +648,53 @@ app.get("/admin/api/billing", async (c) => {
     }
   }
 
-  // Free-tier limits per service, expressed in the same unit as "consumed"
-  // (Cloudflare reports free-tier numbers in the service name, e.g.
-  // "First 375 vCPU-minutes included" -> 375 * 60 = 22500 vCPU-seconds).
-  const FREE_TIERS: Array<{ match: RegExp; limit: number; display: string }> = [
-    { match: /Container vCPU/, limit: 375 * 60, display: "375 vCPU-min" },
-    { match: /Container Memory/, limit: 25 * 3600, display: "25 GiB-hours" },
-    { match: /Container Disk/, limit: 200 * 3600, display: "200 GB-hours" },
-    { match: /Container Egress/, limit: 1000, display: "1 TB" },
-    { match: /Workers CPU ms/, limit: 30_000_000, display: "30M CPU ms" },
-    { match: /Workers Standard Requests/, limit: 10_000_000, display: "10M requests" },
-    { match: /D1 - Rows Written/, limit: 50_000_000, display: "50M rows" },
-    { match: /D1 - Rows Read/, limit: 25_000_000_000, display: "25B rows" },
-    { match: /D1 - Storage/, limit: 5, display: "5 GB-mo" },
-    { match: /Durable Objects Compute Requests/, limit: 1_000_000, display: "1M requests" },
-    { match: /Durable Objects Compute Duration/, limit: 400_000, display: "400k GB*S" },
-    { match: /Durable Objects Storage Rows Read/, limit: 25_000_000_000, display: "25B rows" },
-    { match: /Durable Objects Storage Rows Written/, limit: 50_000_000, display: "50M rows" },
-    { match: /Durable Objects SQL Storage/, limit: 5, display: "5 GB-month" },
+  // Free-tier limits per service, expressed in both consumed units and display units
+  const FREE_TIERS: Array<{ match: RegExp; limit: number; displayLimit: number; displayUnit: string }> = [
+    { match: /Container vCPU/, limit: 375 * 60, displayLimit: 375, displayUnit: "vCPU-min" },
+    { match: /Container Memory/, limit: 25 * 3600, displayLimit: 25, displayUnit: "GiB-hours" },
+    { match: /Container Disk/, limit: 200 * 3600, displayLimit: 200, displayUnit: "GB-hours" },
+    { match: /Container Egress/, limit: 1000, displayLimit: 1000, displayUnit: "GB" },
+    { match: /Workers CPU ms/, limit: 30_000_000, displayLimit: 30, displayUnit: "M CPU ms" },
+    { match: /Workers Standard Requests/, limit: 10_000_000, displayLimit: 10, displayUnit: "M requests" },
+    { match: /D1 - Rows Written/, limit: 50_000_000, displayLimit: 50, displayUnit: "M rows" },
+    { match: /D1 - Rows Read/, limit: 25_000_000_000, displayLimit: 25, displayUnit: "B rows" },
+    { match: /D1 - Storage/, limit: 5, displayLimit: 5, displayUnit: "GB-mo" },
+    { match: /Durable Objects Compute Requests/, limit: 1_000_000, displayLimit: 1, displayUnit: "M requests" },
+    { match: /Durable Objects Compute Duration/, limit: 400_000, displayLimit: 400, displayUnit: "k GB*S" },
+    { match: /Durable Objects Storage Rows Read/, limit: 25_000_000_000, displayLimit: 25, displayUnit: "B rows" },
+    { match: /Durable Objects Storage Rows Written/, limit: 50_000_000, displayLimit: 50, displayUnit: "M rows" },
+    { match: /Durable Objects SQL Storage/, limit: 5, displayLimit: 5, displayUnit: "GB-month" },
   ];
 
   const services = [...byService.values()]
     .map((s) => {
       const tier = FREE_TIERS.find((t) => t.match.test(s.name));
       const limit = tier?.limit ?? 0;
+      const displayLimit = tier?.displayLimit ?? limit;
+      const displayUnit = tier?.displayUnit ?? s.unit;
+      const factor = limit && displayLimit ? limit / displayLimit : 1;
+
       const withinFree = limit ? Math.min(s.consumed, limit) : s.consumed;
       const overFree = limit ? Math.max(0, s.consumed - limit) : 0;
+      
+      const displayConsumed = s.consumed / factor;
+      const displayOver = overFree / factor;
+
       return {
         ...s,
         consumedFormatted: fmtQty(s.consumed),
         billedCost: Math.round(s.billedCost * 10000) / 10000,
         freeTier: tier
-          ? { limit, display: tier.display, withinFree, overFree }
+          ? {
+              limit,
+              display: `${fmtQty(displayLimit)} ${displayUnit}`,
+              withinFree,
+              overFree,
+              displayConsumed: fmtQty(displayConsumed),
+              displayUnit,
+              displayLimit: fmtQty(displayLimit),
+              displayOver: displayOver > 0 ? fmtQty(displayOver) : "0",
+            }
           : null,
       };
     })

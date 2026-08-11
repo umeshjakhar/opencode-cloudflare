@@ -662,8 +662,8 @@ export function getAdminHTML(): string {
           
           infoHtml = \`
             <div class="flex justify-between text-xs text-gray-400 mt-1">
-              <span>Used: <strong class="text-gray-200">\${s.consumedFormatted}</strong> / \${s.freeTier.display}</span>
-              \${over ? \`<span class="text-red-400 font-medium">Over limit by \${s.freeTier.overFree.toFixed(0)}</span>\` : '<span class="text-green-400">Within free tier</span>'}
+              <span>Used: <strong class="text-gray-200">\${s.freeTier.displayConsumed} \${s.freeTier.displayUnit}</strong> / \${s.freeTier.display}</span>
+              \${over ? \`<span class="text-red-400 font-medium">Over limit by \${s.freeTier.displayOver} \${s.freeTier.displayUnit}</span>\` : '<span class="text-green-400">Within free tier</span>'}
             </div>
           \`;
         } else {
