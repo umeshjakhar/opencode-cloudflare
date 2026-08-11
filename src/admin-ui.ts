@@ -615,7 +615,11 @@ export function getAdminHTML(): string {
       }
 
       const currency = data.currency || 'USD';
-      const fmtMoney = (n) => \`\${currency} \${Number(n || 0).toFixed(4)}\`;
+      const fmtMoney = (n) => \`\${currency} \${Number(n || 0).toFixed(2)}\`;
+
+      const sub = data.subscription || { plan: 'Workers Paid', baseFee: 5 };
+      const baseFee = Number(sub.baseFee) || 5;
+      const estTotal = Math.round((baseFee + (data.totalBilled || 0)) * 100) / 100;
 
       const r2Block = data.r2Usage ? \`
         <div class="flex justify-between">
@@ -644,6 +648,7 @@ export function getAdminHTML(): string {
           const maxVal = Math.max(limit, consumed, 1);
           
           const greenPct = (s.freeTier.withinFree / maxVal) * 100;
+          const purplePct = ((limit - s.freeTier.withinFree) / maxVal) * 100;
           const redPct = (s.freeTier.overFree / maxVal) * 100;
           const limitPct = (limit / maxVal) * 100;
           
@@ -651,31 +656,37 @@ export function getAdminHTML(): string {
           
           barHtml = \`
             <div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">
-              <!-- Green: Used within free tier -->
-              <div class="absolute h-full bg-green-500 rounded-full" style="width: \${greenPct}%"></div>
-              <!-- Red: Beyond free tier -->
-              <div class="absolute h-full bg-red-500" style="left: \${greenPct}%; width: \${redPct}%"></div>
-              <!-- Tick marker for the limit -->
-              <div class="absolute h-full w-[2.5px] bg-white opacity-90" style="left: calc(\${limitPct}% - 1.25px)" title="Free tier limit: \${s.freeTier.display}"></div>
+              <!-- Purple: Remaining paid-tier allowance -->
+              <div class="absolute h-full bg-purple-500 rounded-full" style="width: \${purplePct}%"></div>
+              <!-- Green: Used within allowance -->
+              <div class="absolute inset-y-0 left-0 h-full bg-green-500 rounded-full" style="width: \${greenPct}%"></div>
+              <!-- Red: Beyond allowance (billed overage) -->
+              <div class="absolute inset-y-0 h-full bg-red-500" style="left: \${limitPct}%; width: \${redPct}%"></div>
+              <!-- Tick marker for the allowance limit -->
+              <div class="absolute h-full w-[2.5px] bg-gray-100 opacity-90" style="left: calc(\${limitPct}% - 1.25px)" title="Paid-tier allowance: \${s.freeTier.display}"></div>
             </div>
           \`;
           
           infoHtml = \`
             <div class="flex justify-between text-xs text-gray-400 mt-1">
               <span>Used: <strong class="text-gray-200">\${s.freeTier.displayConsumed} \${s.freeTier.displayUnit}</strong> / \${s.freeTier.display}</span>
-              \${over ? \`<span class="text-red-400 font-medium">Over limit by \${s.freeTier.displayOver} \${s.freeTier.displayUnit}</span>\` : '<span class="text-green-400">Within free tier</span>'}
+              \${over
+                ? \`<span class="text-red-400 font-medium">Over by \${s.freeTier.displayOver} \${s.freeTier.displayUnit}</span>\`
+                : \`<span class="text-purple-400 font-medium">\${s.freeTier.displayRemaining} \${s.freeTier.displayUnit} left</span>\`}
             </div>
           \`;
         } else {
+          const maxVal = Math.max(s.consumed, 1);
+          const greenPct = (s.consumed / maxVal) * 100;
           barHtml = \`
             <div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">
-              <div class="absolute h-full bg-blue-500 rounded-full" style="width: 100%"></div>
+              <div class="absolute h-full bg-green-500 rounded-full" style="width: 100%"></div>
             </div>
           \`;
           infoHtml = \`
             <div class="flex justify-between text-xs text-gray-400 mt-1">
               <span>Used: <strong class="text-gray-200">\${s.consumedFormatted}</strong></span>
-              <span>No free tier data</span>
+              <span>No allowance data</span>
             </div>
           \`;
         }
@@ -693,43 +704,28 @@ export function getAdminHTML(): string {
       }).join('');
 
       div.innerHTML = \`
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div class="bg-gray-900/50 rounded-lg p-4">
-            <h3 class="font-medium mb-3 text-gray-300">Estimated Cost</h3>
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-gray-400">Total billed (30d):</span>
-                <span class="text-lg font-bold \${data.totalBilled > 0 ? 'text-yellow-400' : 'text-green-400'}">\${fmtMoney(data.totalBilled)}</span>
-              </div>
-              \${r2Block}
-              \${workerBlock}
+        <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
+          <div class="flex items-center justify-between flex-wrap gap-3">
+            <div>
+              <p class="font-medium text-blue-200">\${sub.plan}</p>
+              <p class="text-xs text-gray-400 mt-0.5">Base \${fmtMoney(baseFee)}/mo + overage \${fmtMoney(data.totalBilled)}</p>
+            </div>
+            <div class="text-right">
+              <p class="text-2xl font-bold \${data.totalBilled > 0 ? 'text-yellow-400' : 'text-green-400'}">\${fmtMoney(estTotal)}</p>
+              <p class="text-xs text-gray-400">estimated / month</p>
             </div>
           </div>
-
-          <div class="bg-gray-900/50 rounded-lg p-4">
-            <h3 class="font-medium mb-3 text-gray-300">Free Tier (per month)</h3>
-            <div class="space-y-2 text-sm">
-              <div class="flex justify-between">
-                <span class="text-gray-400">Containers:</span>
-                <span class="text-gray-300">375 vCPU-min</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-400">Memory:</span>
-                <span class="text-gray-300">25 GiB-hours</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-400">Workers CPU:</span>
-                <span class="text-gray-300">30M ms</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-gray-400">R2 storage:</span>
-                <span class="text-gray-300">10 GB</span>
-              </div>
-            </div>
-          </div>
+          \${r2Block ? '<div class="mt-3 pt-3 border-t border-blue-800 text-sm">' + r2Block + '</div>' : ''}
+          \${workerBlock ? '<div class="mt-2 text-sm">' + workerBlock + '</div>' : ''}
         </div>
 
-        <div class="bg-gray-900/50 rounded-lg p-4 mt-4">
+        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-400">
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-green-500"></span> Used (in allowance)</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-purple-500"></span> Remaining paid-tier allowance</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-red-500"></span> Billed overage</span>
+        </div>
+
+        <div class="bg-gray-900/50 rounded-lg p-4">
           <h3 class="font-medium mb-3 text-gray-300">Service Breakdown</h3>
           <div class="space-y-2">
             \${serviceRows}

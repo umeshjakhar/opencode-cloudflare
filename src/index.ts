@@ -693,6 +693,7 @@ app.get("/admin/api/billing", async (c) => {
               displayConsumed: fmtQty(displayConsumed),
               displayUnit,
               displayLimit: fmtQty(displayLimit),
+              displayRemaining: fmtQty(Math.max(0, displayLimit - displayConsumed)),
               displayOver: displayOver > 0 ? fmtQty(displayOver) : "0",
             }
           : null,
@@ -709,6 +710,30 @@ app.get("/admin/api/billing", async (c) => {
     services.reduce((sum, s) => sum + s.billedCost, 0) * 10000
   ) / 10000;
   const currency = services[0]?.currency || "USD";
+
+  // 2.5 Subscription plan + base fee
+  let subscription: {
+    plan: string;
+    baseFee: number;
+    totalEstimatedMonthly: number;
+  } = {
+    plan: "Workers Paid",
+    baseFee: 5,
+    totalEstimatedMonthly: Math.round((5 + totalBilled) * 100) / 100,
+  };
+  try {
+    const url = `${CF_API_BASE}/accounts/${accountId}/subscriptions`;
+    const res = await fetch(url, { headers: authHeaders });
+    const data = (await res.json()) as any;
+    if (res.ok && data.success && Array.isArray(data.result)) {
+      const plan = data.result[0]?.rate_plan?.public_name;
+      if (typeof plan === "string" && plan) {
+        subscription.plan = plan;
+      }
+    }
+  } catch {
+    // fall back to defaults
+  }
 
   // 2. R2 bucket usage
   let r2Usage: Record<string, string> | null = null;
@@ -765,6 +790,7 @@ app.get("/admin/api/billing", async (c) => {
     period: { from, to },
     totalBilled,
     currency,
+    subscription,
     services,
     r2Usage: r2Usage
       ? {
