@@ -36,7 +36,7 @@ The table below lists every credential this project uses. Set the required ones 
 |---|---|---|---|
 | `OPENCODE_API_KEY` | **Yes** | OpenCode Zen API key — billed for LLM usage | 1. Go to [opencode.ai/auth](https://opencode.ai/auth) <br> 2. Sign in and add billing details <br> 3. Create a key and copy it (starts with `sk-`) |
 | `OPENCODE_SERVER_PASSWORD` | **Yes** | Password for the OpenCode web UI (username `opencode`) | Generate a strong one, e.g. `openssl rand -base64 24` |
-| `ADMIN_PASSWORD` | No | Password for `/admin` dashboard (username `admin`). Defaults to `OPENCODE_SERVER_PASSWORD` if unset | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `ADMIN_PASSWORD` | No | Password for `/admin` dashboard (username `opencode` — same as web UI). Defaults to `OPENCODE_SERVER_PASSWORD` if unset | Generate a strong one, e.g. `openssl rand -base64 24` |
 | `GIT_TOKEN` | Only for private git operations | GitHub Personal Access Token, passed to the container via `git config` insteadOf rules | 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) <br> 2. "Generate new token" → "Fine-grained" <br> 3. Grant **Contents: Read** on the repos you use <br> 4. Copy the token (starts with `github_pat_` or `ghp_`) |
 
 > **Note:** Cloudflare secrets are stored encrypted and only exposed inside the container at runtime — the worker itself never returns their values (`/admin/api/config` only reports whether each is set).
@@ -116,10 +116,9 @@ https://opencode-server.<your-subdomain>.workers.dev
 ### Access Admin Dashboard
 
 The Admin Dashboard lets you monitor and control your container:
-
 1. Open `https://opencode-server.<your-subdomain>.workers.dev/admin` in your browser
-2. Enter admin credentials:
-   - Username: `admin`
+2. Enter admin credentials (same as the OpenCode web UI):
+   - Username: `opencode`
    - Password: Your `ADMIN_PASSWORD` (or `OPENCODE_SERVER_PASSWORD` if not set)
 
 **Admin Features:**
@@ -138,12 +137,12 @@ curl https://opencode-server.<your-subdomain>.workers.dev/worker-health
 curl -u opencode:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/global/health
 
-# Admin API - Get status (requires admin auth)
-curl -u admin:YOUR_ADMIN_PASSWORD \
+# Admin API - Get status (requires admin auth, username `opencode`)
+curl -u opencode:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/admin/api/status
 
-# Admin API - Restart container
-curl -X POST -u admin:YOUR_ADMIN_PASSWORD \
+# Restart the container
+curl -X POST -u opencode:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/admin/api/restart
 ```
 

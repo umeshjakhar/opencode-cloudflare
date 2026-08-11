@@ -371,16 +371,20 @@ app.get("/worker-health", (c) => {
 // CORS for admin API
 app.use("/admin/*", cors());
 
-// Basic auth for admin routes
+// Basic auth for admin routes - use the SAME credentials as OpenCode so the
+// browser caches one credential for the realm "Secure Area" instead of
+// re-prompting on every navigation between admin and web UI.
 app.use("/admin/*", async (c, next) => {
+  const username = "opencode";
   const password = c.env.ADMIN_PASSWORD || c.env.OPENCODE_SERVER_PASSWORD;
   if (!password) {
     return c.text("Admin password not configured", 500);
   }
 
   const auth = basicAuth({
-    username: "admin",
-    password: password,
+    username,
+    password,
+    realm: "Secure Area",
   });
   return auth(c, next);
 });
