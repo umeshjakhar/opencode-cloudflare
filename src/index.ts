@@ -646,13 +646,47 @@ app.get("/admin/api/billing", async (c) => {
     }
   }
 
+  // Free-tier limits per service, expressed in the same unit as "consumed"
+  // (Cloudflare reports free-tier numbers in the service name, e.g.
+  // "First 375 vCPU-minutes included" -> 375 * 60 = 22500 vCPU-seconds).
+  const FREE_TIERS: Array<{ match: RegExp; limit: number; display: string }> = [
+    { match: /Container vCPU/, limit: 375 * 60, display: "375 vCPU-min" },
+    { match: /Container Memory/, limit: 25 * 3600, display: "25 GiB-hours" },
+    { match: /Container Disk/, limit: 200 * 3600, display: "200 GB-hours" },
+    { match: /Container Egress/, limit: 1000, display: "1 TB" },
+    { match: /Workers CPU ms/, limit: 30_000_000, display: "30M CPU ms" },
+    { match: /Workers Standard Requests/, limit: 10_000_000, display: "10M requests" },
+    { match: /D1 - Rows Written/, limit: 50_000_000, display: "50M rows" },
+    { match: /D1 - Rows Read/, limit: 25_000_000_000, display: "25B rows" },
+    { match: /D1 - Storage/, limit: 5, display: "5 GB-mo" },
+    { match: /Durable Objects Compute Requests/, limit: 1_000_000, display: "1M requests" },
+    { match: /Durable Objects Compute Duration/, limit: 400_000, display: "400k GB*S" },
+    { match: /Durable Objects Storage Rows Read/, limit: 25_000_000_000, display: "25B rows" },
+    { match: /Durable Objects Storage Rows Written/, limit: 50_000_000, display: "50M rows" },
+    { match: /Durable Objects SQL Storage/, limit: 5, display: "5 GB-month" },
+  ];
+
   const services = [...byService.values()]
-    .map((s) => ({
-      ...s,
-      consumedFormatted: fmtQty(s.consumed),
-      billedCost: Math.round(s.billedCost * 10000) / 10000,
-    }))
-    .sort((a, b) => b.billedCost - a.billedCost || b.consumed - a.consumed);
+    .map((s) => {
+      const tier = FREE_TIERS.find((t) => t.match.test(s.name));
+      const limit = tier?.limit ?? 0;
+      const withinFree = limit ? Math.min(s.consumed, limit) : s.consumed;
+      const overFree = limit ? Math.max(0, s.consumed - limit) : 0;
+      return {
+        ...s,
+        consumedFormatted: fmtQty(s.consumed),
+        billedCost: Math.round(s.billedCost * 10000) / 10000,
+        freeTier: tier
+          ? { limit, display: tier.display, withinFree, overFree }
+          : null,
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.billedCost - a.billedCost ||
+        (b.freeTier?.overFree || 0) - (a.freeTier?.overFree || 0) ||
+        b.consumed - a.consumed
+    );
 
   const totalBilled = Math.round(
     services.reduce((sum, s) => sum + s.billedCost, 0) * 10000

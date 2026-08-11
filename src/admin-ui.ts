@@ -631,15 +631,66 @@ export function getAdminHTML(): string {
         </div>
       \` : '';
 
-      const serviceRows = (data.services || []).map(s => \`
-        <div class="flex justify-between text-sm">
-          <div class="min-w-0 pr-3">
-            <p class="text-gray-300 truncate" title="\${s.name}">\${s.name}</p>
-            <p class="text-xs text-gray-500">\${s.consumedFormatted} \${s.unit}</p>
+      const serviceRows = (data.services || []).map(s => {
+        const hasFree = !!s.freeTier;
+        const billed = s.billedCost > 0;
+        
+        let barHtml = '';
+        let infoHtml = '';
+        
+        if (hasFree) {
+          const limit = s.freeTier.limit;
+          const consumed = s.consumed;
+          const maxVal = Math.max(limit, consumed, 1);
+          
+          const greenPct = (s.freeTier.withinFree / maxVal) * 100;
+          const redPct = (s.freeTier.overFree / maxVal) * 100;
+          const limitPct = (limit / maxVal) * 100;
+          
+          const over = s.freeTier.overFree > 0;
+          
+          barHtml = \`
+            <div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">
+              <!-- Green: Used within free tier -->
+              <div class="absolute h-full bg-green-500 rounded-full" style="width: \${greenPct}%"></div>
+              <!-- Red: Beyond free tier -->
+              <div class="absolute h-full bg-red-500" style="left: \${greenPct}%; width: \${redPct}%"></div>
+              <!-- Tick marker for the limit -->
+              <div class="absolute h-full w-[2.5px] bg-white opacity-90" style="left: calc(\${limitPct}% - 1.25px)" title="Free tier limit: \${s.freeTier.display}"></div>
+            </div>
+          \`;
+          
+          infoHtml = \`
+            <div class="flex justify-between text-xs text-gray-400 mt-1">
+              <span>Used: <strong class="text-gray-200">\${s.consumedFormatted}</strong> / \${s.freeTier.display}</span>
+              \${over ? \`<span class="text-red-400 font-medium">Over limit by \${s.freeTier.overFree.toFixed(0)}</span>\` : '<span class="text-green-400">Within free tier</span>'}
+            </div>
+          \`;
+        } else {
+          barHtml = \`
+            <div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">
+              <div class="absolute h-full bg-blue-500 rounded-full" style="width: 100%"></div>
+            </div>
+          \`;
+          infoHtml = \`
+            <div class="flex justify-between text-xs text-gray-400 mt-1">
+              <span>Used: <strong class="text-gray-200">\${s.consumedFormatted}</strong></span>
+              <span>No free tier data</span>
+            </div>
+          \`;
+        }
+        
+        return \`
+          <div class="bg-gray-900/40 border border-gray-800 rounded-lg p-3.5 mb-2.5">
+            <div class="flex justify-between text-sm">
+              <span class="text-gray-300 font-medium truncate pr-2" title="\${s.name}">\${s.name}</span>
+              <span class="\${billed ? 'text-yellow-400 font-bold' : 'text-gray-500'} whitespace-nowrap">\${fmtMoney(s.billedCost)}</span>
+            </div>
+            \${barHtml}
+            \${infoHtml}
           </div>
-          <span class="\${s.billedCost > 0 ? 'text-yellow-400 font-medium' : 'text-gray-500'} whitespace-nowrap">\${fmtMoney(s.billedCost)}</span>
-        </div>
-      \`).join('');
+        \`;
+      }).join('');
 
       div.innerHTML = \`
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
