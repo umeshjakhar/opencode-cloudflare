@@ -642,7 +642,7 @@ export function getAdminHTML(): string {
         </div>
       \` : '';
 
-      const serviceRows = (data.services || []).map(s => {
+      let serviceRows = (data.services || []).map(s => {
         const hasFree = !!s.freeTier;
         const billed = s.billedCost > 0;
         
