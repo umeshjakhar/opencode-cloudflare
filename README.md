@@ -139,6 +139,31 @@ curl -X POST -u admin:YOUR_ADMIN_PASSWORD \
 | `/admin/api/stop` | POST | Stop the container |
 | `/admin/api/restart` | POST | Restart the container |
 | `/admin/api/config` | GET | Get configuration (secrets masked) |
+| `/admin/api/sleep` | GET | Get current auto-sleep idle timeout |
+| `/admin/api/sleep` | POST | Set auto-sleep idle timeout (`{"sleepAfter":"15m"}`) |
+| `/admin/api/keepwarm` | GET | Get keep-warm status (`{"enabled":true\|false}`) |
+| `/admin/api/keepwarm` | POST | Enable/disable keep-warm (`{"enabled":true}`) |
+
+## Sleep & Power Management
+
+The container auto-sleeps after an idle timeout to stop billing. Both settings are
+editable live from the **Sleep & Power Management** card on the admin dashboard and
+persist across restarts (stored in the Durable Object).
+
+- **Auto-Sleep Timer** (`sleepAfter`): idle time before the container sleeps. Accepts
+  seconds or `m`/`h`/`d` suffixes, e.g. `15m`, `2h`, `1d`. Presets: `10m`, `30m`, `1h`, `6h`, `24h`.
+  Default `24h`.
+- **Keep Warm**: when ON, a cron pings the container every 10 minutes so it never sleeps.
+  When OFF (default), the container sleeps after the idle timeout — this is the cost-saving mode.
+
+> **What counts as "activity"?** Only network requests reaching the container reset the
+> idle timer (an active agent streaming a response counts; a merely-open browser tab does
+> not). Keep-warm pings also count, so don't enable keep-warm if you want the container
+> to sleep.
+
+> **Warning:** disk is ephemeral. After sleeping, the container restarts with a fresh
+> disk — repos are re-cloned by `startup.sh`, but in-container session history and
+> uncommitted work are lost.
 
 ## Configuration
 
@@ -167,12 +192,15 @@ routes = [
 
 ### Keep Container Warm
 
-Add a cron trigger to prevent idle timeout:
+The cron trigger is already configured in `wrangler.toml`:
 
 ```toml
 [triggers]
 crons = ["*/10 * * * *"]
 ```
+
+It only pings the container when **Keep Warm** is enabled in the admin dashboard —
+with it off (default), the scheduled handler skips the ping so the container can sleep.
 
 ## Cost Estimate
 

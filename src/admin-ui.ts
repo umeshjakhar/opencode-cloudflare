@@ -81,6 +81,68 @@ export function getAdminHTML(): string {
       <div id="action-result" class="mt-4 text-sm min-h-[24px]"></div>
     </div>
     
+    <!-- Sleep & Power Management -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <h2 class="text-xl font-semibold mb-1">Sleep &amp; Power Management</h2>
+      <p class="text-gray-400 text-sm mb-4">Control idle timeout and keep-warm to manage cost. Billing only accrues while the container is actively running.</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Auto-sleep -->
+        <div class="bg-gray-900/50 rounded-lg p-4">
+          <h3 class="font-medium mb-3 text-gray-300">Auto-Sleep Timer</h3>
+          <div class="space-y-3">
+            <div class="flex justify-between items-center">
+              <span class="text-gray-400">Current idle timeout:</span>
+              <span id="sleep-after" class="font-mono text-sm bg-gray-800 px-2 py-1 rounded">-</span>
+            </div>
+            <div>
+              <label class="block text-sm text-gray-400 mb-1" for="sleep-input">Custom value</label>
+              <div class="flex gap-2">
+                <input
+                  id="sleep-input"
+                  type="text"
+                  placeholder="e.g. 15m, 2h, 1d"
+                  class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  onclick="saveSleep()"
+                  class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm transition-colors whitespace-nowrap"
+                >
+                  Save
+                </button>
+              </div>
+              <p class="text-xs text-gray-500 mt-1">Accepts seconds, or suffixes like <code class="text-gray-400">m</code>, <code class="text-gray-400">h</code>, <code class="text-gray-400">d</code>.</p>
+            </div>
+            <div>
+              <span class="block text-sm text-gray-400 mb-2">Presets</span>
+              <div class="flex flex-wrap gap-2" id="sleep-presets"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Keep warm -->
+        <div class="bg-gray-900/50 rounded-lg p-4">
+          <h3 class="font-medium mb-3 text-gray-300">Keep Warm</h3>
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-sm text-gray-300">Ping every 10 minutes</p>
+                <p class="text-xs text-gray-500 mt-1">On: container stays awake. Off: sleeps after idle timeout.</p>
+              </div>
+              <label class="relative inline-flex items-center cursor-pointer">
+                <input type="checkbox" id="keepwarm-toggle" class="sr-only peer" onchange="toggleKeepWarm()">
+                <div class="w-11 h-6 bg-gray-600 peer-focus:outline-none rounded-full peer peer-checked:bg-green-600 transition-colors after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:after:translate-x-full"></div>
+              </label>
+            </div>
+            <div id="keepwarm-status" class="text-xs text-gray-400">Loading...</div>
+            <div class="text-xs text-gray-500 border-t border-gray-800 pt-3">
+              <p class="mb-1"><span class="text-gray-300">Cost note:</span> keep-warm means the container never sleeps, so it is billed 24/7. Leave it off if you want to save cost.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- Configuration -->
     <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
       <div class="flex items-center justify-between mb-4">
@@ -319,6 +381,72 @@ export function getAdminHTML(): string {
       \`;
     }
     
+    const SLEEP_PRESETS = ['10m', '30m', '1h', '6h', '24h'];
+
+    async function refreshPower() {
+      const sleepData = await fetchAPI('/sleep');
+      const warmData = await fetchAPI('/keepwarm');
+
+      if (!sleepData.error) {
+        document.getElementById('sleep-after').textContent = sleepData.sleepAfter || 'unknown';
+        renderSleepPresets(sleepData.sleepAfter || '');
+      }
+      if (!warmData.error) {
+        const enabled = !!warmData.enabled;
+        document.getElementById('keepwarm-toggle').checked = enabled;
+        document.getElementById('keepwarm-status').textContent = enabled
+          ? 'Keep-warm is ON - container stays awake (billed continuously).'
+          : 'Keep-warm is OFF - container sleeps after idle timeout.';
+      }
+    }
+
+    function renderSleepPresets(current) {
+      const container = document.getElementById('sleep-presets');
+      container.innerHTML = SLEEP_PRESETS.map(preset => {
+        const active = current === preset;
+        return '<button onclick="setSleepPreset(\'' + preset + '\')" class="text-xs px-3 py-1.5 rounded transition-colors ' +
+          (active ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300') + '">' + preset + '</button>';
+      }).join('');
+    }
+
+    function setSleepPreset(value) {
+      document.getElementById('sleep-input').value = value;
+      saveSleep();
+    }
+
+    async function saveSleep() {
+      const value = document.getElementById('sleep-input').value.trim();
+      if (!value) {
+        showActionResult('Please enter an idle timeout', 'error');
+        return;
+      }
+      const data = await fetchAPI('/sleep', {
+        method: 'POST',
+        body: JSON.stringify({ sleepAfter: value }),
+      });
+      if (data.error) {
+        showActionResult('Sleep timer: ' + data.error, 'error');
+        return;
+      }
+      showActionResult('Auto-sleep set to ' + data.sleepAfter, true);
+      await refreshPower();
+    }
+
+    async function toggleKeepWarm() {
+      const enabled = document.getElementById('keepwarm-toggle').checked;
+      const data = await fetchAPI('/keepwarm', {
+        method: 'POST',
+        body: JSON.stringify({ enabled }),
+      });
+      if (data.error) {
+        document.getElementById('keepwarm-toggle').checked = !enabled;
+        showActionResult('Keep-warm: ' + data.error, 'error');
+        return;
+      }
+      showActionResult(enabled ? 'Keep-warm enabled' : 'Keep-warm disabled', true);
+      await refreshPower();
+    }
+
     async function startContainer() {
       disableAllButtons();
       showActionResult('Starting container...', 'info');
@@ -379,6 +507,7 @@ export function getAdminHTML(): string {
     // Initial load
     refreshStatus();
     refreshConfig();
+    refreshPower();
     startAutoRefresh();
     
     // Refresh on visibility change
@@ -386,6 +515,7 @@ export function getAdminHTML(): string {
       if (document.visibilityState === 'visible') {
         refreshStatus();
         refreshConfig();
+        refreshPower();
       }
     });
   </script>

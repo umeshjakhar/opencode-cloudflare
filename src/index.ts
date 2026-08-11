@@ -13,6 +13,16 @@ interface Env {
   ADMIN_PASSWORD?: string;
 }
 
+const SLEEP_AFTER_KEY = "sleepAfter";
+const KEEP_WARM_KEY = "keepWarm";
+const DEFAULT_SLEEP_AFTER = "24h";
+
+const JSON_HEADERS = { "Content-Type": "application/json" };
+
+function isValidSleepAfter(value: string): boolean {
+  return /^\d+(ms|s|m|h|d)?$/.test(value.trim());
+}
+
 // Container class with admin endpoints
 export class OpenCodeContainer extends Container<Env> {
   defaultPort = 4096;
@@ -21,6 +31,25 @@ export class OpenCodeContainer extends Container<Env> {
 
   private startTime: number | null = null;
 
+  private async loadSleepAfter(): Promise<void> {
+    try {
+      const stored = await this.ctx.storage.get<string>(SLEEP_AFTER_KEY);
+      if (stored && isValidSleepAfter(stored) && stored !== this.sleepAfter) {
+        this.sleepAfter = stored;
+      }
+    } catch {
+      // storage unavailable, keep current value
+    }
+  }
+
+  private async getKeepWarm(): Promise<boolean> {
+    try {
+      return (await this.ctx.storage.get<boolean>(KEEP_WARM_KEY)) ?? false;
+    } catch {
+      return false;
+    }
+  }
+
   override async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -28,6 +57,8 @@ export class OpenCodeContainer extends Container<Env> {
     if (url.pathname.startsWith("/__admin/")) {
       return this.handleAdminRequest(request, url);
     }
+
+    await this.loadSleepAfter();
 
     // Set environment variables dynamically before handling request
     this.envVars = {
@@ -72,6 +103,14 @@ export class OpenCodeContainer extends Container<Env> {
           return this.doRestart();
         case "/config":
           return this.getConfig();
+        case "/sleep":
+          if (request.method === "GET") return this.getSleepSettings();
+          if (request.method === "POST") return this.setSleepSettings(request);
+          return new Response("Method not allowed", { status: 405 });
+        case "/keepwarm":
+          if (request.method === "GET") return this.getKeepWarmSettings();
+          if (request.method === "POST") return this.setKeepWarmSettings(request);
+          return new Response("Method not allowed", { status: 405 });
         default:
           return new Response("Not found", { status: 404 });
       }
@@ -210,6 +249,69 @@ export class OpenCodeContainer extends Container<Env> {
     );
   }
 
+  private async getSleepSettings(): Promise<Response> {
+    return new Response(
+      JSON.stringify({ sleepAfter: this.sleepAfter }),
+      { headers: JSON_HEADERS }
+    );
+  }
+
+  private async setSleepSettings(request: Request): Promise<Response> {
+    let body: { sleepAfter?: string } = {};
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: JSON_HEADERS,
+      });
+    }
+
+    const value = body.sleepAfter?.trim();
+    if (!value || !isValidSleepAfter(value)) {
+      return new Response(
+        JSON.stringify({ error: "Invalid sleepAfter. Use e.g. 30s, 5m, 1h, 24h or seconds" }),
+        { status: 400, headers: JSON_HEADERS }
+      );
+    }
+
+    await this.ctx.storage.put(SLEEP_AFTER_KEY, value);
+    this.sleepAfter = value;
+    this.renewActivityTimeout();
+
+    return new Response(
+      JSON.stringify({ success: true, sleepAfter: value }),
+      { headers: JSON_HEADERS }
+    );
+  }
+
+  private async getKeepWarmSettings(): Promise<Response> {
+    return new Response(
+      JSON.stringify({ enabled: await this.getKeepWarm() }),
+      { headers: JSON_HEADERS }
+    );
+  }
+
+  private async setKeepWarmSettings(request: Request): Promise<Response> {
+    let body: { enabled?: boolean } = {};
+    try {
+      body = await request.json();
+    } catch {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: JSON_HEADERS,
+      });
+    }
+
+    const enabled = !!body.enabled;
+    await this.ctx.storage.put(KEEP_WARM_KEY, enabled);
+
+    return new Response(
+      JSON.stringify({ success: true, enabled }),
+      { headers: JSON_HEADERS }
+    );
+  }
+
   override onStart() {
     this.startTime = Date.now();
     console.log("OpenCode container started");
@@ -314,6 +416,56 @@ app.get("/admin/api/config", async (c) => {
   }
 });
 
+app.get("/admin/api/sleep", async (c) => {
+  try {
+    const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+    return container.fetch(new Request("http://localhost/__admin/sleep"));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
+app.post("/admin/api/sleep", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+    return container.fetch(
+      new Request("http://localhost/__admin/sleep", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    );
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
+app.get("/admin/api/keepwarm", async (c) => {
+  try {
+    const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+    return container.fetch(new Request("http://localhost/__admin/keepwarm"));
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
+app.post("/admin/api/keepwarm", async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+    return container.fetch(
+      new Request("http://localhost/__admin/keepwarm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      })
+    );
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
 // Default route - proxy all other requests to container (OpenCode server)
 app.all("*", async (c) => {
   const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
@@ -327,6 +479,16 @@ export default {
   async scheduled(controller: ScheduledController, env: Env): Promise<void> {
     const container = getContainer(env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
     try {
+      // Check keep-warm flag first (handled in the DO, doesn't start the container)
+      const warmRes = await container.fetch(
+        new Request("http://localhost/__admin/keepwarm")
+      );
+      const warm = (await warmRes.json()) as { enabled?: boolean };
+      if (!warm.enabled) {
+        console.log("Keep-warm disabled, skipping ping");
+        return;
+      }
+
       const response = await container.fetch(
         new Request("http://localhost/global/health")
       );

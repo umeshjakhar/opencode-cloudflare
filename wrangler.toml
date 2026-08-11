@@ -16,6 +16,12 @@ class_name = "OpenCodeContainer"
 tag = "v1"
 new_sqlite_classes = ["OpenCodeContainer"]
 
+# Keep-warm scheduler. When enabled in the admin dashboard, this pings the
+# container every 10 minutes so it never sleeps. Disabled -> no pings, so the
+# container sleeps after the configured idle timeout.
+[triggers]
+crons = ["*/10 * * * *"]
+
 [vars]
 # Git repos to clone on startup (comma-separated)
 # Update this with your actual repos
