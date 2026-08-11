@@ -251,6 +251,13 @@ export function getAdminHTML(): string {
       if (minutes > 0) return minutes + 'm ' + (seconds % 60) + 's';
       return seconds + 's';
     }
+
+    function fmtBytes(bytes) {
+      if (!bytes || bytes === 0) return '0 B';
+      const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+      return (bytes / Math.pow(1024, i)).toFixed(2) + ' ' + units[i];
+    }
     
     async function refreshStatus() {
       const data = await fetchAPI('/status');
