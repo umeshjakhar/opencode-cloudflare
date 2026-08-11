@@ -666,9 +666,35 @@ app.get("/admin/api/billing", async (c) => {
     { match: /Durable Objects SQL Storage/, limit: 5, displayLimit: 5, displayUnit: "GB-month" },
   ];
 
+  // Free plan (no $5/mo base) limits - expressed in the SAME consumed units as FREE_TIERS
+  // so they can be plotted on the same bar. onFree=false means feature is Paid-only.
+  const FREE_PLAN_TIERS: Array<{
+    match: RegExp;
+    limit: number;
+    displayLimit: number;
+    displayUnit: string;
+    onFree: boolean;
+  }> = [
+    // Containers are Paid-only on Cloudflare (no free containers)
+    { match: /Container vCPU/, limit: 0, displayLimit: 0, displayUnit: "vCPU-min", onFree: false },
+    { match: /Container Memory/, limit: 0, displayLimit: 0, displayUnit: "GiB-hours", onFree: false },
+    { match: /Container Disk/, limit: 0, displayLimit: 0, displayUnit: "GB-hours", onFree: false },
+    { match: /Container Egress/, limit: 0, displayLimit: 0, displayUnit: "GB", onFree: false },
+    // Workers Free: 100k req/day ≈ 3M/month
+    { match: /Workers CPU ms/, limit: 3_000_000, displayLimit: 3, displayUnit: "M CPU ms", onFree: true },
+    { match: /Workers Standard Requests/, limit: 3_000_000, displayLimit: 3, displayUnit: "M requests", onFree: true },
+    // D1 Free: 5 GB storage, 5M rows read/day, 100k rows written/day
+    { match: /D1 - Rows Written/, limit: 3_000_000, displayLimit: 3, displayUnit: "M rows/mo", onFree: true },
+    { match: /D1 - Rows Read/, limit: 150_000_000, displayLimit: 150, displayUnit: "M rows/mo", onFree: true },
+    { match: /D1 - Storage/, limit: 5, displayLimit: 5, displayUnit: "GB-mo", onFree: true },
+    // Durable Objects: not on Free
+    { match: /Durable Objects/, limit: 0, displayLimit: 0, displayUnit: "", onFree: false },
+  ];
+
   const services = [...byService.values()]
     .map((s) => {
       const tier = FREE_TIERS.find((t) => t.match.test(s.name));
+      const free = FREE_PLAN_TIERS.find((t) => t.match.test(s.name));
       const limit = tier?.limit ?? 0;
       const displayLimit = tier?.displayLimit ?? limit;
       const displayUnit = tier?.displayUnit ?? s.unit;
@@ -676,9 +702,27 @@ app.get("/admin/api/billing", async (c) => {
 
       const withinFree = limit ? Math.min(s.consumed, limit) : s.consumed;
       const overFree = limit ? Math.max(0, s.consumed - limit) : 0;
-      
+
       const displayConsumed = s.consumed / factor;
       const displayOver = overFree / factor;
+
+      // Free-plan info
+      let freePlan: { limit: number; display: string; onFree: boolean; overFreePlan: number; needsPaid: boolean } | null = null;
+      if (free) {
+        const fpLimit = free.limit;
+        const fpDisplay = free.onFree
+          ? `${fmtQty(free.displayLimit)} ${free.displayUnit}`
+          : "N/A (Paid only)";
+        const overFp = fpLimit ? Math.max(0, s.consumed - fpLimit) : (s.consumed > 0 ? s.consumed : 0);
+        const needsPaid = !free.onFree ? s.consumed > 0 : overFp > 0;
+        freePlan = {
+          limit: fpLimit,
+          display: fpDisplay,
+          onFree: free.onFree,
+          overFreePlan: overFp,
+          needsPaid,
+        };
+      }
 
       return {
         ...s,
@@ -695,6 +739,7 @@ app.get("/admin/api/billing", async (c) => {
               displayLimit: fmtQty(displayLimit),
               displayRemaining: fmtQty(Math.max(0, displayLimit - displayConsumed)),
               displayOver: displayOver > 0 ? fmtQty(displayOver) : "0",
+              freePlan,
             }
           : null,
       };
@@ -793,12 +838,22 @@ app.get("/admin/api/billing", async (c) => {
     subscription,
     services,
     r2Usage: r2Usage
-      ? {
-          payloadSizeBytes: Number(r2Usage.payloadSize) || 0,
-          payloadSizeFormatted: fmtBytes(Number(r2Usage.payloadSize) || 0),
-          objectCount: Number(r2Usage.objectCount) || 0,
-          uploadCount: Number(r2Usage.uploadCount) || 0,
-        }
+      ? (() => {
+          const payloadSize = Number(r2Usage.payloadSize) || 0;
+          const freeLimitBytes = 10 * 1024 * 1024 * 1024; // 10 GB
+          const over = Math.max(0, payloadSize - freeLimitBytes);
+          return {
+            payloadSizeBytes: payloadSize,
+            payloadSizeFormatted: fmtBytes(payloadSize),
+            objectCount: Number(r2Usage.objectCount) || 0,
+            uploadCount: Number(r2Usage.uploadCount) || 0,
+            freePlanLimitBytes: freeLimitBytes,
+            freePlanLimitFormatted: "10 GB",
+            overFreePlanBytes: over,
+            overFreePlanFormatted: fmtBytes(over),
+            needsPaid: over > 0,
+          };
+        })()
       : null,
     workerStats,
     freeTierNotes: {

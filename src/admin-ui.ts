@@ -654,6 +654,19 @@ export function getAdminHTML(): string {
           
           const over = s.freeTier.overFree > 0;
           
+          // Free plan tick (orange dashed) - position based on freePlan.limit
+          let freePlanTickHtml = '';
+          const fp = s.freeTier.freePlan;
+          if (fp) {
+            if (fp.limit > 0) {
+              const fpPct = (fp.limit / maxVal) * 100;
+              freePlanTickHtml = \`<div class="absolute h-full w-[2px] bg-orange-400 opacity-90" style="left: calc(\${fpPct}% - 1px)" title="Free plan limit: \${fp.display}"></div>\`;
+            } else if (!fp.onFree) {
+              // Paid-only feature: show tiny orange marker at left edge
+              freePlanTickHtml = \`<div class="absolute h-full w-[2px] bg-orange-400 opacity-90 left-0" title="Not available on Free plan"></div>\`;
+            }
+          }
+          
           barHtml = \`
             <div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">
               <!-- Purple: Remaining paid-tier allowance -->
@@ -662,17 +675,32 @@ export function getAdminHTML(): string {
               <div class="absolute inset-y-0 left-0 h-full bg-green-500 rounded-full" style="width: \${greenPct}%"></div>
               <!-- Red: Beyond allowance (billed overage) -->
               <div class="absolute inset-y-0 h-full bg-red-500" style="left: \${limitPct}%; width: \${redPct}%"></div>
-              <!-- Tick marker for the allowance limit -->
+              <!-- Tick marker for the Paid allowance limit -->
               <div class="absolute h-full w-[2.5px] bg-gray-100 opacity-90" style="left: calc(\${limitPct}% - 1.25px)" title="Paid-tier allowance: \${s.freeTier.display}"></div>
+              <!-- Tick marker for the Free plan limit -->
+              \${freePlanTickHtml}
             </div>
           \`;
           
+          // Build the right-side info: "X left" or "Over by X" or free-plan note
+          let rightStatus = '';
+          if (fp && fp.needsPaid) {
+            rightStatus = \`<span class="text-orange-300 font-medium">Needs Paid plan</span>\`;
+          } else if (over) {
+            rightStatus = \`<span class="text-red-400 font-medium">Over by \${s.freeTier.displayOver} \${s.freeTier.displayUnit}</span>\`;
+          } else {
+            rightStatus = \`<span class="text-purple-400 font-medium">\${s.freeTier.displayRemaining} \${s.freeTier.displayUnit} left</span>\`;
+          }
+          
+          let leftStatus = \`Used: <strong class="text-gray-200">\${s.freeTier.displayConsumed} \${s.freeTier.displayUnit}</strong> / \${s.freeTier.display}\`;
+          if (fp) {
+            leftStatus += \` &middot; Free plan: <strong class="text-gray-300">\${fp.display}</strong>\`;
+          }
+          
           infoHtml = \`
             <div class="flex justify-between text-xs text-gray-400 mt-1">
-              <span>Used: <strong class="text-gray-200">\${s.freeTier.displayConsumed} \${s.freeTier.displayUnit}</strong> / \${s.freeTier.display}</span>
-              \${over
-                ? \`<span class="text-red-400 font-medium">Over by \${s.freeTier.displayOver} \${s.freeTier.displayUnit}</span>\`
-                : \`<span class="text-purple-400 font-medium">\${s.freeTier.displayRemaining} \${s.freeTier.displayUnit} left</span>\`}
+              <span>\${leftStatus}</span>
+              \${rightStatus}
             </div>
           \`;
         } else {
@@ -703,6 +731,35 @@ export function getAdminHTML(): string {
         \`;
       }).join('');
 
+      // Add R2 storage as its own bar (R2 isn't in billable-usage)
+      if (data.r2Usage) {
+        const r2 = data.r2Usage;
+        const maxBytes = Math.max(r2.freePlanLimitBytes, r2.payloadSizeBytes, 1);
+        const greenPct = (Math.min(r2.payloadSizeBytes, r2.freePlanLimitBytes) / maxBytes) * 100;
+        const purplePct = Math.max(0, ((r2.freePlanLimitBytes - r2.payloadSizeBytes) / maxBytes) * 100);
+        const fpPct = (r2.freePlanLimitBytes / maxBytes) * 100;
+        const needsPaid = r2.needsPaid;
+        const leftBytes = fmtBytes(Math.max(0, r2.freePlanLimitBytes - r2.payloadSizeBytes));
+        const rightHtml = needsPaid
+          ? '<span class="text-red-400 font-medium">Over free plan by ' + r2.overFreePlanFormatted + '</span>'
+          : '<span class="text-purple-400 font-medium">' + leftBytes + ' left on free plan</span>';
+        serviceRows += '<div class="bg-gray-900/40 border border-gray-800 rounded-lg p-3.5 mb-2.5">'
+          + '<div class="flex justify-between text-sm">'
+          + '<span class="text-gray-300 font-medium truncate pr-2" title="R2 Storage">R2 Storage</span>'
+          + '<span class="text-gray-500 whitespace-nowrap">included</span>'
+          + '</div>'
+          + '<div class="relative h-3.5 rounded-full bg-gray-700/50 overflow-hidden w-full my-1.5 border border-gray-700">'
+          + '<div class="absolute h-full bg-purple-500 rounded-full" style="width: ' + purplePct + '%"></div>'
+          + '<div class="absolute inset-y-0 left-0 h-full bg-green-500 rounded-full" style="width: ' + greenPct + '%"></div>'
+          + '<div class="absolute h-full w-[2.5px] bg-gray-100 opacity-90" style="left: calc(' + fpPct + '% - 1.25px)" title="Free plan: ' + r2.freePlanLimitFormatted + '"></div>'
+          + '</div>'
+          + '<div class="flex justify-between text-xs text-gray-400 mt-1">'
+          + '<span>Used: <strong class="text-gray-200">' + r2.payloadSizeFormatted + '</strong> / ' + r2.freePlanLimitFormatted + ' (free plan cap)</span>'
+          + rightHtml
+          + '</div>'
+          + '</div>';
+      }
+
       div.innerHTML = \`
         <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4">
           <div class="flex items-center justify-between flex-wrap gap-3">
@@ -723,6 +780,7 @@ export function getAdminHTML(): string {
           <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-green-500"></span> Used (in allowance)</span>
           <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-purple-500"></span> Remaining paid-tier allowance</span>
           <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-red-500"></span> Billed overage</span>
+          <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-orange-400" style="height:2px"></span> Free plan limit</span>
         </div>
 
         <div class="bg-gray-900/50 rounded-lg p-4">
