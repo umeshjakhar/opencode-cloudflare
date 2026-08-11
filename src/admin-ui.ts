@@ -143,6 +143,23 @@ export function getAdminHTML(): string {
       </div>
     </div>
 
+    <!-- Instance Size -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Instance Size</h2>
+        <button
+          onclick="refreshInstanceType()"
+          class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+        >
+          Refresh
+        </button>
+      </div>
+      <p class="text-gray-400 text-sm mb-4">CPU / RAM / disk allocated to the container. Changing the size triggers a rolling rollout (a few seconds).</p>
+      <div id="instance-type" class="space-y-4">
+        <p class="text-gray-400">Loading instance types...</p>
+      </div>
+    </div>
+
     <!-- Configuration -->
     <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
       <div class="flex items-center justify-between mb-4">
@@ -804,14 +821,85 @@ export function getAdminHTML(): string {
       if (autoRefreshInterval) clearInterval(autoRefreshInterval);
       autoRefreshInterval = setInterval(refreshStatus, 30000); // Every 30 seconds
     }
-    
+
+    async function refreshInstanceType() {
+      const div = document.getElementById('instance-type');
+      const data = await fetchAPI('/instance-type');
+
+      if (data.error) {
+        div.innerHTML = '<div class="bg-red-900/30 border border-red-700 rounded p-3">'
+          + '<p class="text-red-400 font-medium">Error fetching instance types</p>'
+          + '<p class="text-red-300 text-sm mt-1">' + data.error + '</p>'
+          + '</div>';
+        return;
+      }
+
+      const current = data.current || {};
+      const currentName = current.instanceType || '';
+      const options = data.instanceTypes || [];
+
+      const optionsHtml = options.map(t => {
+        const selected = t.name === currentName;
+        return '<option value="' + t.name + '"' + (selected ? ' selected' : '') + '>'
+          + t.name + ' - ' + t.vcpu + ' vCPU, ' + t.memory + ' RAM, ' + t.disk + ' disk'
+          + '</option>';
+      }).join('');
+
+      const currentInfo = current && currentName
+        ? '<div class="text-xs text-gray-400 mb-3">'
+          + 'Currently running: <strong class="text-gray-200">' + currentName + '</strong>'
+          + ' (' + current.vcpu + ' vCPU, ' + current.memory + ', ' + current.disk + ' disk)'
+          + '</div>'
+        : '';
+
+      div.innerHTML = currentInfo
+        + '<div class="flex flex-col sm:flex-row gap-3">'
+        + '<select id="instance-type-select" class="flex-1 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">'
+        + optionsHtml
+        + '</select>'
+        + '<button id="apply-instance-type-btn" onclick="applyInstanceType()" class="bg-blue-600 hover:bg-blue-700 px-5 py-2 rounded text-sm font-medium transition-colors whitespace-nowrap">Apply Size</button>'
+        + '</div>'
+        + '<div id="instance-type-msg" class="text-xs text-gray-500 mt-2"></div>';
+    }
+
+    async function applyInstanceType() {
+      const select = document.getElementById('instance-type-select');
+      const msg = document.getElementById('instance-type-msg');
+      const btn = document.getElementById('apply-instance-type-btn');
+      const instanceType = select ? select.value : '';
+      if (!instanceType) return;
+      btn.disabled = true;
+      btn.textContent = 'Applying...';
+      if (msg) msg.textContent = '';
+      const data = await fetchAPI('/instance-type', {
+        method: 'POST',
+        body: JSON.stringify({ instanceType }),
+      });
+      btn.disabled = false;
+      btn.textContent = 'Apply Size';
+      if (data.error) {
+        if (msg) {
+          msg.textContent = data.error;
+          msg.className = 'text-xs text-red-400 mt-2';
+        }
+        return;
+      }
+      if (msg) {
+        msg.textContent = data.message || 'Instance size updated. Rollout in progress...';
+        msg.className = 'text-xs text-green-400 mt-2';
+      }
+      setTimeout(refreshInstanceType, 4000);
+      setTimeout(refreshInstanceType, 12000);
+    }
+
     // Initial load
     refreshStatus();
     refreshConfig();
     refreshPower();
     refreshBilling();
+    refreshInstanceType();
     startAutoRefresh();
-    
+
     // Refresh on visibility change
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
@@ -819,6 +907,7 @@ export function getAdminHTML(): string {
         refreshConfig();
         refreshPower();
         refreshBilling();
+        refreshInstanceType();
       }
     });
   </script>

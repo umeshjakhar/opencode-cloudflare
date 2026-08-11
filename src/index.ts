@@ -544,9 +544,165 @@ app.post("/admin/api/opencode-config", async (c) => {
   }
 });
 
-// Billing & usage insights (uses CF_API_TOKEN secret, requires Billing Read)
+// Container instance size (vCPU/RAM/disk). Changing it triggers a rolling
+// rollout via the Cloudflare Containers API - workers do not need a redeploy.
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
 
+const INSTANCE_TYPES = [
+  { name: "lite",        vcpu: "1/16", memory: "256 MiB", disk: "2 GB" },
+  { name: "basic",       vcpu: "1/4",  memory: "1 GiB",   disk: "4 GB" },
+  { name: "standard-1",  vcpu: "1/2",  memory: "4 GiB",   disk: "8 GB" },
+  { name: "standard-2",  vcpu: "1",    memory: "6 GiB",   disk: "12 GB" },
+  { name: "standard-3",  vcpu: "2",    memory: "8 GiB",   disk: "16 GB" },
+  { name: "standard-4",  vcpu: "4",    memory: "12 GiB",  disk: "20 GB" },
+];
+
+// Container application ID (lives in your Cloudflare account). This is what
+// we PATCH to change the instance_type and POST to rollouts endpoint.
+const CONTAINER_APP_ID = "a03e3005-8eea-49dd-bd88-6d1c571c87f3";
+
+async function fetchCurrentContainerConfig(env: Env): Promise<{
+  vcpu: number;
+  memory_mib: number;
+  disk_mb: number;
+  memory: string;
+  disk: string;
+} | null> {
+  const token = env.CF_API_TOKEN;
+  const accountId = env.R2_ACCOUNT_ID;
+  if (!token || !accountId || !CONTAINER_APP_ID) return null;
+  try {
+    const res = await fetch(
+      `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const data = (await res.json()) as any;
+    if (!res.ok || !data.success) return null;
+    const c = data.result?.configuration || {};
+    return {
+      vcpu: c.vcpu,
+      memory_mib: c.memory_mib,
+      disk_mb: c.disk?.size_mb,
+      memory: c.memory,
+      disk: c.disk?.size,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function inferInstanceType(vcpu: number, memory_mib: number, disk_mb?: number): string {
+  for (const t of INSTANCE_TYPES) {
+    if (t.name === "lite" && vcpu < 0.1) return "lite";
+    if (t.name === "basic" && vcpu <= 0.25 && memory_mib <= 1024) return "basic";
+    if (t.name === "standard-1" && vcpu <= 0.5 && memory_mib <= 4096) return "standard-1";
+    if (t.name === "standard-2" && vcpu <= 1 && memory_mib <= 6144) return "standard-2";
+    if (t.name === "standard-3" && vcpu <= 2 && memory_mib <= 8192) return "standard-3";
+    if (t.name === "standard-4" && vcpu <= 4 && memory_mib <= 12288) return "standard-4";
+  }
+  return "standard-2";
+}
+
+app.get("/admin/api/instance-type", async (c) => {
+  const token = c.env.CF_API_TOKEN;
+  const accountId = c.env.R2_ACCOUNT_ID;
+  if (!token || !accountId) {
+    return c.json({ error: "CF_API_TOKEN or R2_ACCOUNT_ID not configured" }, 400);
+  }
+  const current = await fetchCurrentContainerConfig(c.env);
+  return c.json({
+    instanceTypes: INSTANCE_TYPES,
+    current: current
+      ? {
+          instanceType: inferInstanceType(current.vcpu, current.memory_mib, current.disk_mb),
+          vcpu: current.vcpu,
+          memory: current.memory,
+          memoryMib: current.memory_mib,
+          disk: current.disk,
+          diskMb: current.disk_mb,
+        }
+      : null,
+  });
+});
+
+app.post("/admin/api/instance-type", async (c) => {
+  const token = c.env.CF_API_TOKEN;
+  const accountId = c.env.R2_ACCOUNT_ID;
+  if (!token || !accountId) {
+    return c.json({ error: "CF_API_TOKEN or R2_ACCOUNT_ID not configured" }, 400);
+  }
+  if (!CONTAINER_APP_ID) {
+    return c.json({ error: "Container app id not available" }, 500);
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const requested = typeof body.instanceType === "string" ? body.instanceType.trim() : "";
+  const valid = INSTANCE_TYPES.find((t) => t.name === requested);
+  if (!valid) {
+    return c.json(
+      { error: `Invalid instance type. Choose one of: ${INSTANCE_TYPES.map((t) => t.name).join(", ")}` },
+      400
+    );
+  }
+
+  // 1) Update the target configuration on the application
+  const patchRes = await fetch(
+    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}`,
+    {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ configuration: { instance_type: valid.name } }),
+    }
+  );
+  const patchData = (await patchRes.json()) as any;
+  if (!patchRes.ok || !patchData.success) {
+    return c.json(
+      {
+        error: `Failed to update configuration: ${
+          patchData?.errors?.[0]?.message || patchRes.statusText
+        }`,
+      },
+      502
+    );
+  }
+
+  // 2) Trigger a rolling rollout to actually apply the change
+  const rolloutRes = await fetch(
+    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}/rollouts`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        description: `Switch to ${valid.name}`,
+        strategy: "rolling",
+        target_configuration: { instance_type: valid.name },
+        kind: "full_auto",
+        step_percentage: 100,
+      }),
+    }
+  );
+  const rolloutData = (await rolloutRes.json()) as any;
+  if (!rolloutRes.ok || !rolloutData.success) {
+    return c.json(
+      {
+        error: `Configuration updated but rollout failed: ${
+          rolloutData?.errors?.[0]?.message || rolloutRes.statusText
+        }. The new size will apply on the next deploy.`,
+        partial: true,
+      },
+      502
+    );
+  }
+
+  return c.json({
+    success: true,
+    message: `Instance size changing to ${valid.name} (${valid.vcpu} vCPU, ${valid.memory} RAM, ${valid.disk} disk). Rollout in progress.`,
+    rolloutId: rolloutData.result?.id,
+    instanceType: valid.name,
+  });
+});
+
+// Billing & usage insights (uses CF_API_TOKEN secret, requires Billing Read)
 interface BillingRow {
   ServiceName: string;
   ServiceFamilyName: string;
