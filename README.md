@@ -9,7 +9,7 @@ Run OpenCode as a persistent web server on Cloudflare Containers, powered by **O
 - **Admin Dashboard** - manage container lifecycle, view status, configuration
 - **OpenCode Zen** - curated, optimized models for coding
 - HTTP Basic Auth for security
-- Git repos auto-cloned on container startup
+- Persistent storage via R2 + FUSE mount (config, data, and repos survive sleep/restarts)
 - Full REST API + SSE events support
 
 ## Prerequisites
@@ -37,8 +37,7 @@ The table below lists every credential this project uses. Set the required ones 
 | `OPENCODE_API_KEY` | **Yes** | OpenCode Zen API key — billed for LLM usage | 1. Go to [opencode.ai/auth](https://opencode.ai/auth) <br> 2. Sign in and add billing details <br> 3. Create a key and copy it (starts with `sk-`) |
 | `OPENCODE_SERVER_PASSWORD` | **Yes** | Password for the OpenCode web UI (username `opencode`) | Generate a strong one, e.g. `openssl rand -base64 24` |
 | `ADMIN_PASSWORD` | No | Password for `/admin` dashboard (username `admin`). Defaults to `OPENCODE_SERVER_PASSWORD` if unset | Generate a strong one, e.g. `openssl rand -base64 24` |
-| `GIT_TOKEN` | Only for private repos | GitHub Personal Access Token used to clone private `GIT_REPOS` | 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) <br> 2. "Generate new token" → "Fine-grained" <br> 3. Grant **Contents: Read-only** on the repos you want to clone <br> 4. Copy the token (starts with `github_pat_` or `ghp_`) |
-| `GIT_REPOS` | No | Comma-separated repo URLs cloned on container start. **Not a secret** — set as a `[vars]` in `wrangler.toml` | Use `https://` URLs. For private repos, auth is handled by `GIT_TOKEN` |
+| `GIT_TOKEN` | Only for private git operations | GitHub Personal Access Token, passed to the container via `git config` insteadOf rules | 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) <br> 2. "Generate new token" → "Fine-grained" <br> 3. Grant **Contents: Read** on the repos you use <br> 4. Copy the token (starts with `github_pat_` or `ghp_`) |
 
 > **Note:** Cloudflare secrets are stored encrypted and only exposed inside the container at runtime — the worker itself never returns their values (`/admin/api/config` only reports whether each is set).
 
@@ -56,7 +55,7 @@ wrangler secret put OPENCODE_SERVER_PASSWORD
 # Optional: Separate admin password (defaults to OPENCODE_SERVER_PASSWORD)
 wrangler secret put ADMIN_PASSWORD
 
-# Optional: GitHub token for private repos
+# Optional: GitHub token for private git operations
 wrangler secret put GIT_TOKEN
 ```
 
@@ -66,14 +65,33 @@ Verify all secrets were stored:
 wrangler secret list
 ```
 
-### 4. Configure git repos (optional)
+### 4. Configure R2 persistent storage (recommended)
 
-Edit `wrangler.toml` and set the `GIT_REPOS` variable with comma-separated repo URLs (this is a plain var, not a secret):
+The container's disk is ephemeral and is wiped on sleep/restart. To keep your data
+(OpenCode config, sessions, and repos), mount an R2 bucket inside the container via
+[tigrisfs](https://github.com/tigrisdata/tigrisfs):
 
-```toml
-[vars]
-GIT_REPOS = "https://github.com/your-org/repo1,https://github.com/your-org/repo2"
-```
+1. In the Cloudflare dashboard, go to **R2** and enable it on your account.
+2. Create a bucket (e.g. `opencode-persistent`) and set it in `wrangler.toml`:
+   ```toml
+   [vars]
+   R2_ACCOUNT_ID = "your-account-id"
+   R2_BUCKET_NAME = "opencode-persistent"
+   ```
+3. Create an API token with **Object Read & Write** access to that bucket and set the secrets:
+   ```bash
+   wrangler secret put R2_ACCESS_KEY_ID
+   wrangler secret put R2_SECRET_ACCESS_KEY
+   ```
+
+On boot the container mounts the bucket at `/mnt/r2` and symlinks:
+- `~/.config/opencode` → `/mnt/r2/opencode-config`
+- `~/.local/share/opencode` → `/mnt/r2/opencode-data`
+
+Repos are stored under `/mnt/r2/repos` and are picked up by OpenCode as projects — add
+or update them with a normal `git clone` / `git push` against that path, and they persist.
+
+If R2 is not configured, the container falls back to ephemeral storage.
 
 ### 5. Deploy
 
@@ -161,9 +179,9 @@ persist across restarts (stored in the Durable Object).
 > not). Keep-warm pings also count, so don't enable keep-warm if you want the container
 > to sleep.
 
-> **Warning:** disk is ephemeral. After sleeping, the container restarts with a fresh
-> disk — repos are re-cloned by `startup.sh`, but in-container session history and
-> uncommitted work are lost.
+> **Storage:** data lives in R2 via the FUSE mount. After sleeping, the container
+> restarts with a fresh ephemeral disk, but `~/.config/opencode`,
+> `~/.local/share/opencode`, and repos under `/mnt/r2/repos` persist.
 
 ## Configuration
 
@@ -258,9 +276,11 @@ Should show:
 
 Verify your Zen API key is valid at [opencode.ai/auth](https://opencode.ai/auth) and has sufficient balance.
 
-### Git clone failing
+### Git operations failing
 
-For private repos, ensure `GIT_TOKEN` is set with appropriate permissions.
+Repos live on the R2 mount under `/mnt/r2/repos`. For private repos, ensure `GIT_TOKEN`
+is set with appropriate permissions. To add a repo, `git clone` it into `/mnt/r2/repos`
+from inside the container or push to the mount path from your local machine.
 
 ## License
 

@@ -23,12 +23,13 @@ new_sqlite_classes = ["OpenCodeContainer"]
 crons = ["*/10 * * * *"]
 
 [vars]
-# Git repos to clone on startup (comma-separated)
-# Update this with your actual repos
-GIT_REPOS = "https://github.com/umeshjakhar/khabribai"
+# R2 persistent storage (non-secret config; credentials go in secrets)
+R2_ACCOUNT_ID = "c462a7bcb7dd0bf5eeedb2144b2ac25a"
+R2_BUCKET_NAME = "opencode-persistent"
 
 # Secrets (set via wrangler secret put):
 # - OPENCODE_SERVER_PASSWORD (required for OpenCode server auth)
 # - OPENCODE_API_KEY (OpenCode Zen API key - get from https://opencode.ai/auth)
 # - ADMIN_PASSWORD (optional, for admin UI - defaults to OPENCODE_SERVER_PASSWORD)
-# - GIT_TOKEN (optional, for private repos)
+# - GIT_TOKEN (optional, for private git operations)
+# - R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (required for persistent storage - get from R2 dashboard)

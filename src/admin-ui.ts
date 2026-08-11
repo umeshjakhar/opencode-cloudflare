@@ -350,17 +350,16 @@ export function getAdminHTML(): string {
           </div>
           
           <div class="bg-gray-900/50 rounded-lg p-4">
-            <h3 class="font-medium mb-3 text-gray-300">Git Repositories</h3>
+            <h3 class="font-medium mb-3 text-gray-300">Persistent Storage</h3>
             <div class="text-sm">
-              \${data.envVars?.GIT_REPOS ? \`
-                <ul class="space-y-1">
-                  \${data.envVars.GIT_REPOS.split(',').filter(r => r.trim()).map(repo => \`
-                    <li class="text-gray-300 truncate" title="\${repo.trim()}">
-                      <span class="text-gray-500">•</span> \${repo.trim().split('/').slice(-1)[0].replace('.git', '') || repo.trim()}
-                    </li>
-                  \`).join('')}
-                </ul>
-              \` : '<p class="text-gray-500 italic">No repositories configured</p>'}
+              <div class="flex justify-between items-center">
+                <span class="text-gray-400">R2 Bucket:</span>
+                <span class="text-blue-400">opencode-persistent</span>
+              </div>
+              <div class="flex justify-between items-center mt-2">
+                <span class="text-gray-400">Repos:</span>
+                <span class="text-gray-300">/mnt/r2/repos</span>
+              </div>
             </div>
           </div>
         </div>

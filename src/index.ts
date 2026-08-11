@@ -8,9 +8,12 @@ interface Env {
   OPENCODE_CONTAINER: DurableObjectNamespace<OpenCodeContainer>;
   OPENCODE_SERVER_PASSWORD: string;
   OPENCODE_API_KEY: string;
-  GIT_REPOS: string;
   GIT_TOKEN?: string;
   ADMIN_PASSWORD?: string;
+  R2_ACCOUNT_ID?: string;
+  R2_BUCKET_NAME?: string;
+  R2_ACCESS_KEY_ID?: string;
+  R2_SECRET_ACCESS_KEY?: string;
 }
 
 const SLEEP_AFTER_KEY = "sleepAfter";
@@ -70,9 +73,16 @@ export class OpenCodeContainer extends Container<Env> {
       // OpenCode Zen API key
       OPENCODE_API_KEY: this.env.OPENCODE_API_KEY || "",
 
-      // Git repos to clone on startup
-      GIT_REPOS: this.env.GIT_REPOS || "",
+      // Git token for private repo operations
       GIT_TOKEN: this.env.GIT_TOKEN || "",
+
+      // R2 persistent storage (FUSE mount)
+      R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
+      R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
+      R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
+      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     // Call the parent fetch which handles container lifecycle
@@ -156,8 +166,15 @@ export class OpenCodeContainer extends Container<Env> {
       OPENCODE_PERMISSION: '{"edit":"allow","bash":"allow","write":"allow"}',
       OPENCODE_DISABLE_AUTOUPDATE: "true",
       OPENCODE_API_KEY: this.env.OPENCODE_API_KEY || "",
-      GIT_REPOS: this.env.GIT_REPOS || "",
       GIT_TOKEN: this.env.GIT_TOKEN || "",
+
+      // R2 persistent storage (FUSE mount)
+      R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
+      R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
+      R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
+      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     await this.startAndWaitForPorts({
@@ -206,8 +223,15 @@ export class OpenCodeContainer extends Container<Env> {
       OPENCODE_PERMISSION: '{"edit":"allow","bash":"allow","write":"allow"}',
       OPENCODE_DISABLE_AUTOUPDATE: "true",
       OPENCODE_API_KEY: this.env.OPENCODE_API_KEY || "",
-      GIT_REPOS: this.env.GIT_REPOS || "",
       GIT_TOKEN: this.env.GIT_TOKEN || "",
+
+      // R2 persistent storage (FUSE mount)
+      R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
+      R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
+      R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
+      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
+      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     await this.startAndWaitForPorts({
@@ -229,7 +253,7 @@ export class OpenCodeContainer extends Container<Env> {
     return new Response(
       JSON.stringify({
         envVars: {
-          GIT_REPOS: this.env.GIT_REPOS || "",
+
           // Don't expose actual secrets, just whether they're set
           hasServerPassword: !!this.env.OPENCODE_SERVER_PASSWORD,
           hasApiKey: !!this.env.OPENCODE_API_KEY,
