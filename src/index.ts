@@ -10,6 +10,7 @@ interface Env {
   OPENCODE_API_KEY: string;
   GIT_TOKEN?: string;
   ADMIN_PASSWORD?: string;
+  OPENCODE_CONFIG_R2?: R2Bucket;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
   R2_ACCESS_KEY_ID?: string;
@@ -485,6 +486,58 @@ app.post("/admin/api/keepwarm", async (c) => {
         body: JSON.stringify(body),
       })
     );
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
+const OPENCODE_CONFIG_KEY = "opencode-config/opencode.json";
+
+const DEFAULT_OPENCODE_CONFIG = `{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode/claude-sonnet-4",
+  "autoupdate": false,
+  "share": "disabled"
+}`;
+
+async function readOpenCodeConfig(env: Env): Promise<{ content: string; persisted: boolean }> {
+  const bucket = env.OPENCODE_CONFIG_R2;
+  if (bucket) {
+    const obj = await bucket.get(OPENCODE_CONFIG_KEY);
+    if (obj) {
+      return { content: await obj.text(), persisted: true };
+    }
+  }
+  return { content: DEFAULT_OPENCODE_CONFIG, persisted: false };
+}
+
+app.get("/admin/api/opencode-config", async (c) => {
+  try {
+    const { content, persisted } = await readOpenCodeConfig(c.env);
+    return c.json({ content, persisted, writable: !!c.env.OPENCODE_CONFIG_R2 });
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
+app.post("/admin/api/opencode-config", async (c) => {
+  try {
+    if (!c.env.OPENCODE_CONFIG_R2) {
+      return c.json({ error: "R2 storage not configured" }, 400);
+    }
+    const body = await c.req.json().catch(() => ({}));
+    const content = typeof body.content === "string" ? body.content : "";
+    if (!content.trim()) {
+      return c.json({ error: "Content is empty" }, 400);
+    }
+    // Validate it's parseable JSON before saving
+    try {
+      JSON.parse(content);
+    } catch {
+      return c.json({ error: "Invalid JSON" }, 400);
+    }
+    await c.env.OPENCODE_CONFIG_R2.put(OPENCODE_CONFIG_KEY, content);
+    return c.json({ success: true, message: "Configuration saved. Restart the container to apply changes." });
   } catch (error) {
     return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
   }

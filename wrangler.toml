@@ -27,6 +27,12 @@ crons = ["*/10 * * * *"]
 R2_ACCOUNT_ID = "c462a7bcb7dd0bf5eeedb2144b2ac25a"
 R2_BUCKET_NAME = "opencode-persistent"
 
+# R2 bucket binding so the worker/admin API can read & write the persisted
+# opencode.json directly (same bucket the container mounts via FUSE)
+[[r2_buckets]]
+binding = "OPENCODE_CONFIG_R2"
+bucket_name = "opencode-persistent"
+
 # Secrets (set via wrangler secret put):
 # - OPENCODE_SERVER_PASSWORD (required for OpenCode server auth)
 # - OPENCODE_API_KEY (OpenCode Zen API key - get from https://opencode.ai/auth)

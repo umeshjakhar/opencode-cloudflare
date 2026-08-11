@@ -229,7 +229,10 @@ with it off (default), the scheduled handler skips the ping so the container can
 
 ## Available Models (via Zen)
 
-The default model is `opencode/claude-sonnet-4`. To change it, edit `opencode.json`:
+The default model is `opencode/claude-sonnet-4`. You can edit the full `opencode.json`
+live from the admin dashboard: **OpenCode Configuration** card → edit the JSON → **Save**
+(or **Save & Restart** to apply immediately). It is persisted to R2
+(`opencode-config/opencode.json`) and survives restarts.
 
 ```json
 {

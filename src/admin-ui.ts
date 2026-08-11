@@ -365,15 +365,43 @@ export function getAdminHTML(): string {
         </div>
         
         <div class="mt-4 bg-gray-900/50 rounded-lg p-4">
-          <h3 class="font-medium mb-3 text-gray-300">Model Configuration</h3>
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="font-medium text-gray-300">OpenCode Configuration</h3>
+            <button
+              onclick="loadOpenCodeConfig()"
+              class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
           <div class="text-sm">
-            <div class="flex justify-between items-center">
-              <span class="text-gray-400">Provider:</span>
-              <span class="text-blue-400">OpenCode Zen</span>
-            </div>
-            <div class="flex justify-between items-center mt-2">
-              <span class="text-gray-400">Default Model:</span>
+            <div class="flex justify-between items-center mb-3">
+              <span class="text-gray-400">Model:</span>
               <span class="font-mono text-xs bg-gray-800 px-2 py-1 rounded">\${data.containerConfig?.model || 'opencode/claude-sonnet-4'}</span>
+            </div>
+            <textarea
+              id="opencode-config-editor"
+              rows="14"
+              spellcheck="false"
+              class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 font-mono text-xs text-gray-200 focus:outline-none focus:border-blue-500"
+              placeholder="Loading configuration..."
+            ></textarea>
+            <div class="flex items-center justify-between mt-3">
+              <div id="opencode-config-msg" class="text-xs text-gray-500"></div>
+              <div class="flex gap-2">
+                <button
+                  onclick="saveOpenCodeConfig()"
+                  class="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition-colors"
+                >
+                  Save
+                </button>
+                <button
+                  onclick="saveOpenCodeConfig(true)"
+                  class="text-sm bg-green-700 hover:bg-green-600 px-4 py-2 rounded transition-colors"
+                >
+                  Save & Restart
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -381,6 +409,62 @@ export function getAdminHTML(): string {
     }
     
     const SLEEP_PRESETS = ['10m', '30m', '1h', '6h', '24h'];
+
+    async function loadOpenCodeConfig() {
+      const editor = document.getElementById('opencode-config-editor');
+      const msg = document.getElementById('opencode-config-msg');
+      if (editor) {
+        editor.placeholder = 'Loading configuration...';
+        editor.value = '';
+      }
+      if (msg) msg.textContent = '';
+      const data = await fetchAPI('/opencode-config');
+      if (data.error) {
+        if (msg) {
+          msg.textContent = 'Error: ' + data.error;
+          msg.className = 'text-xs text-red-400';
+        }
+        return;
+      }
+      if (editor) {
+        editor.value = data.content || '';
+        editor.placeholder = '';
+      }
+      if (msg) {
+        msg.textContent = data.persisted
+          ? 'Editing persisted opencode.json (R2). Changes apply on restart.'
+          : 'No persisted config yet - saving will create it.';
+        msg.className = 'text-xs text-gray-500';
+      }
+    }
+
+    async function saveOpenCodeConfig(restart = false) {
+      const editor = document.getElementById('opencode-config-editor');
+      const msg = document.getElementById('opencode-config-msg');
+      if (!editor) return;
+      const content = editor.value;
+      try {
+        JSON.parse(content);
+      } catch (e) {
+        msg.textContent = 'Invalid JSON: ' + e.message;
+        msg.className = 'text-xs text-red-400';
+        return;
+      }
+      const data = await fetchAPI('/opencode-config', {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      });
+      if (data.error) {
+        msg.textContent = 'Save failed: ' + data.error;
+        msg.className = 'text-xs text-red-400';
+        return;
+      }
+      msg.textContent = data.message || 'Configuration saved';
+      msg.className = 'text-xs text-green-400';
+      if (restart) {
+        await restartContainer();
+      }
+    }
 
     async function refreshPower() {
       const sleepData = await fetchAPI('/sleep');
@@ -507,6 +591,7 @@ export function getAdminHTML(): string {
     refreshStatus();
     refreshConfig();
     refreshPower();
+    loadOpenCodeConfig();
     startAutoRefresh();
     
     // Refresh on visibility change
@@ -515,6 +600,7 @@ export function getAdminHTML(): string {
         refreshStatus();
         refreshConfig();
         refreshPower();
+        loadOpenCodeConfig();
       }
     });
   </script>
