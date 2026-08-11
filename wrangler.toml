@@ -19,7 +19,7 @@ new_sqlite_classes = ["OpenCodeContainer"]
 [vars]
 # Git repos to clone on startup (comma-separated)
 # Update this with your actual repos
-GIT_REPOS = ""
+GIT_REPOS = "https://github.com/umeshjakhar/khabribai"
 
 # Secrets (set via wrangler secret put):
 # - OPENCODE_SERVER_PASSWORD (required for OpenCode server auth)
