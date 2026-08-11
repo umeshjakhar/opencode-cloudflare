@@ -403,7 +403,7 @@ export function getAdminHTML(): string {
       const container = document.getElementById('sleep-presets');
       container.innerHTML = SLEEP_PRESETS.map(preset => {
         const active = current === preset;
-        return '<button onclick="setSleepPreset(\'' + preset + '\')" class="text-xs px-3 py-1.5 rounded transition-colors ' +
+        return '<button onclick="setSleepPreset(\\'' + preset + '\\')" class="text-xs px-3 py-1.5 rounded transition-colors ' +
           (active ? 'bg-blue-600 text-white' : 'bg-gray-700 hover:bg-gray-600 text-gray-300') + '">' + preset + '</button>';
       }).join('');
     }
