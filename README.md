@@ -88,11 +88,11 @@ The container's disk is ephemeral and is wiped on sleep/restart. To keep your da
 2. Create a bucket (e.g. `opencode-persistent`) and set it in `wrangler.toml`:
    ```toml
    [vars]
-   R2_ACCOUNT_ID = "your-account-id"
    R2_BUCKET_NAME = "opencode-persistent"
    ```
 3. Create an API token with **Object Read & Write** access to that bucket and set the secrets:
    ```bash
+   wrangler secret put R2_ACCOUNT_ID        # your Cloudflare account ID
    wrangler secret put R2_ACCESS_KEY_ID
    wrangler secret put R2_SECRET_ACCESS_KEY
    ```
