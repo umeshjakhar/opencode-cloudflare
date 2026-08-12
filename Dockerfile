@@ -34,9 +34,10 @@ COPY --chown=root:root opencode.json /home/dev/.config/opencode/opencode.json
 COPY --chown=root:root startup.sh /home/dev/startup.sh
 RUN chmod +x /home/dev/startup.sh
 
-# FreeLLMAPI helpers: periodic WAL checkpoint (persists dashboard edits to R2)
-# and dashboard account provisioning from the universal admin credentials.
-COPY --chown=root:root db-checkpoint.js ensure-user.js /home/dev/
+# FreeLLMAPI helpers: periodic WAL checkpoint (persists dashboard edits to R2),
+# dashboard account provisioning from the universal admin credentials, and
+# automatic FreeLLMAPI provider wiring into OpenCode's config.
+COPY --chown=root:root db-checkpoint.js ensure-user.js ensure-opencode-config.js /home/dev/
 
 EXPOSE 4096
 

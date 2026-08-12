@@ -155,6 +155,14 @@ OpenAI-compatible `/v1/chat/completions` endpoint.
 4. Add your provider API keys in the dashboard and grab your unified API key from the
    **API Keys** page to use with any OpenAI-compatible client.
 
+**Wired into OpenCode automatically:** OpenCode can also use FreeLLMAPI as a model
+provider directly (great for testing/prompts through the free auto-routed models).
+On every boot, `ensure-opencode-config.js` injects the `freellmapi` provider into
+`opencode.json` with the current unified API key, and on first boot sets the default
+model to `freellmapi/auto`. If you change the model in the admin panel afterwards, your
+choice is preserved. The base URL is `http://127.0.0.1:3001/v1` since both apps share
+the container.
+
 > **Note:** FreeLLMAPI requires a valid email and a password **≥ 8 characters** — your
 > `ADMIN_PASSWORD` must meet that or dashboard login will fail. Also, changing
 > `ADMIN_EMAIL`/`ADMIN_PASSWORD` only takes effect on the next container restart.

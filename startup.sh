@@ -189,6 +189,10 @@ JSON
         echo "[ensure-user] ADMIN_EMAIL/ADMIN_PASSWORD not set, leaving dashboard unclaimed"
       fi
 
+      # Wire FreeLLMAPI into OpenCode automatically (provider + default model).
+      # Needs the unified API key, so it runs only after the server is up.
+      node /home/dev/ensure-opencode-config.js || echo "[ensure-opencode-config] failed (non-fatal)"
+
       # Periodic WAL checkpoint so dashboard edits land in the main DB file
       # (which tigrisfs syncs to R2) instead of the volatile -wal sidecar.
       (
