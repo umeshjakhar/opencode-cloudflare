@@ -1,4 +1,4 @@
-import { Container, getContainer } from "@cloudflare/containers";
+import { Container, getContainer, switchPort } from "@cloudflare/containers";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { basicAuth } from "hono/basic-auth";
@@ -10,12 +10,15 @@ interface Env {
   OPENCODE_API_KEY: string;
   GIT_TOKEN?: string;
   ADMIN_PASSWORD?: string;
+  ADMIN_EMAIL?: string;
+  FREELLMAPI_ENCRYPTION_KEY?: string;
   OPENCODE_CONFIG_R2?: R2Bucket;
   R2_ACCOUNT_ID?: string;
   R2_BUCKET_NAME?: string;
   R2_ACCESS_KEY_ID?: string;
   R2_SECRET_ACCESS_KEY?: string;
   CF_API_TOKEN?: string;
+  CONTAINER_APP_ID?: string;
 }
 
 const SLEEP_AFTER_KEY = "sleepAfter";
@@ -77,6 +80,18 @@ export class OpenCodeContainer extends Container<Env> {
 
       // Git token for private repo operations
       GIT_TOKEN: this.env.GIT_TOKEN || "",
+
+      // Universal dashboard/admin credentials - the SAME login for the OpenCode
+      // web UI, the admin panel, and the FreeLLMAPI dashboard. Rotate them from
+      // Cloudflare -> Workers -> Settings -> Variables (secrets). startup.sh
+      // auto-provisions the FreeLLMAPI account from these on every boot.
+      ADMIN_EMAIL: this.env.ADMIN_EMAIL || "",
+      ADMIN_PASSWORD: this.env.ADMIN_PASSWORD || "",
+
+      // Encryption key for FreeLLMAPI at-rest key storage. Persist it once via
+      // wrangler secret put; startup.sh reuses it so saved keys stay
+      // decryptable across container restarts.
+      FREELLMAPI_ENCRYPTION_KEY: this.env.FREELLMAPI_ENCRYPTION_KEY || "",
 
       // R2 persistent storage (FUSE mount)
       R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
@@ -170,6 +185,18 @@ export class OpenCodeContainer extends Container<Env> {
       OPENCODE_API_KEY: this.env.OPENCODE_API_KEY || "",
       GIT_TOKEN: this.env.GIT_TOKEN || "",
 
+      // Universal dashboard/admin credentials - the SAME login for the OpenCode
+      // web UI, the admin panel, and the FreeLLMAPI dashboard. Rotate them from
+      // Cloudflare -> Workers -> Settings -> Variables (secrets). startup.sh
+      // auto-provisions the FreeLLMAPI account from these on every boot.
+      ADMIN_EMAIL: this.env.ADMIN_EMAIL || "",
+      ADMIN_PASSWORD: this.env.ADMIN_PASSWORD || "",
+
+      // Encryption key for FreeLLMAPI at-rest key storage. Persist it once via
+      // wrangler secret put; startup.sh reuses it so saved keys stay
+      // decryptable across container restarts.
+      FREELLMAPI_ENCRYPTION_KEY: this.env.FREELLMAPI_ENCRYPTION_KEY || "",
+
       // R2 persistent storage (FUSE mount)
       R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
       R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
@@ -227,6 +254,18 @@ export class OpenCodeContainer extends Container<Env> {
       OPENCODE_API_KEY: this.env.OPENCODE_API_KEY || "",
       GIT_TOKEN: this.env.GIT_TOKEN || "",
 
+      // Universal dashboard/admin credentials - the SAME login for the OpenCode
+      // web UI, the admin panel, and the FreeLLMAPI dashboard. Rotate them from
+      // Cloudflare -> Workers -> Settings -> Variables (secrets). startup.sh
+      // auto-provisions the FreeLLMAPI account from these on every boot.
+      ADMIN_EMAIL: this.env.ADMIN_EMAIL || "",
+      ADMIN_PASSWORD: this.env.ADMIN_PASSWORD || "",
+
+      // Encryption key for FreeLLMAPI at-rest key storage. Persist it once via
+      // wrangler secret put; startup.sh reuses it so saved keys stay
+      // decryptable across container restarts.
+      FREELLMAPI_ENCRYPTION_KEY: this.env.FREELLMAPI_ENCRYPTION_KEY || "",
+
       // R2 persistent storage (FUSE mount)
       R2_ACCOUNT_ID: this.env.R2_ACCOUNT_ID || "",
       R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
@@ -261,6 +300,8 @@ export class OpenCodeContainer extends Container<Env> {
           hasApiKey: !!this.env.OPENCODE_API_KEY,
           hasGitToken: !!this.env.GIT_TOKEN,
           hasAdminPassword: !!this.env.ADMIN_PASSWORD,
+          hasAdminEmail: !!this.env.ADMIN_EMAIL,
+          hasFreellmapiEncryptionKey: !!this.env.FREELLMAPI_ENCRYPTION_KEY,
         },
         containerConfig: {
           defaultPort: this.defaultPort,
@@ -375,7 +416,7 @@ app.use("/admin/*", cors());
 // browser caches one credential for the realm "Secure Area" instead of
 // re-prompting on every navigation between admin and web UI.
 app.use("/admin/*", async (c, next) => {
-  const username = "opencode";
+  const username = c.env.ADMIN_EMAIL || "opencode";
   const password = c.env.ADMIN_PASSWORD || c.env.OPENCODE_SERVER_PASSWORD;
   if (!password) {
     return c.text("Admin password not configured", 500);
@@ -563,8 +604,11 @@ const INSTANCE_TYPES = [
 ];
 
 // Container application ID (lives in your Cloudflare account). This is what
-// we PATCH to change the instance_type and POST to rollouts endpoint.
-const CONTAINER_APP_ID = "a03e3005-8eea-49dd-bd88-6d1c571c87f3";
+// we PATCH to change the instance_type and POST to rollouts endpoint. Set it
+// via the CONTAINER_APP_ID var in wrangler.toml (or as a secret).
+function containerAppId(env: Env): string {
+  return env.CONTAINER_APP_ID || "";
+}
 
 async function fetchCurrentContainerConfig(env: Env): Promise<{
   vcpu: number;
@@ -575,10 +619,11 @@ async function fetchCurrentContainerConfig(env: Env): Promise<{
 } | null> {
   const token = env.CF_API_TOKEN;
   const accountId = env.R2_ACCOUNT_ID;
-  if (!token || !accountId || !CONTAINER_APP_ID) return null;
+  const appId = containerAppId(env);
+  if (!token || !accountId || !appId) return null;
   try {
     const res = await fetch(
-      `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}`,
+      `${CF_API_BASE}/accounts/${accountId}/containers/applications/${appId}`,
       { headers: { Authorization: `Bearer ${token}` } }
     );
     const data = (await res.json()) as any;
@@ -636,8 +681,9 @@ app.post("/admin/api/instance-type", async (c) => {
   if (!token || !accountId) {
     return c.json({ error: "CF_API_TOKEN or R2_ACCOUNT_ID not configured" }, 400);
   }
-  if (!CONTAINER_APP_ID) {
-    return c.json({ error: "Container app id not available" }, 500);
+  const appId = containerAppId(c.env);
+  if (!appId) {
+    return c.json({ error: "Container app id not available (set CONTAINER_APP_ID)" }, 500);
   }
 
   const body = await c.req.json().catch(() => ({}));
@@ -652,7 +698,7 @@ app.post("/admin/api/instance-type", async (c) => {
 
   // 1) Update the target configuration on the application
   const patchRes = await fetch(
-    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}`,
+    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${appId}`,
     {
       method: "PATCH",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -673,7 +719,7 @@ app.post("/admin/api/instance-type", async (c) => {
 
   // 2) Trigger a rolling rollout to actually apply the change
   const rolloutRes = await fetch(
-    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${CONTAINER_APP_ID}/rollouts`,
+    `${CF_API_BASE}/accounts/${accountId}/containers/applications/${appId}/rollouts`,
     {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
@@ -1049,6 +1095,33 @@ app.get("/admin/api/billing", async (c) => {
   });
 });
 
+// Proxy /freellmapi/* to container's internal port 3001 (FreeLLMAPI).
+// The dashboard is built with VITE_BASE=/freellmapi/ so its asset/API URLs
+// arrive under this prefix; strip it before forwarding so the container sees
+// its native paths (/assets/..., /api/..., /v1/...).
+app.all("/freellmapi/*", async (c) => {
+  const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+  const url = new URL(c.req.url);
+  url.pathname = url.pathname.replace(/^\/freellmapi/, "") || "/";
+  const proxied = switchPort(new Request(url, c.req.raw), 3001);
+  return container.fetch(proxied);
+});
+
+// Debug route to read FreeLLMAPI log from R2
+app.get("/debug/freellmapi-log", async (c) => {
+  const bucket = c.env.OPENCODE_CONFIG_R2;
+  if (!bucket) {
+    return c.text("R2 not configured", 404);
+  }
+  const key = ".freellmapi/freellmapi.log";
+  const object = await bucket.get(key);
+  if (object === null) {
+    return c.text("Log file not found", 404);
+  }
+  return c.text(await object.text());
+});
+
+// Default route - proxy all other requests to container (OpenCode server)
 // Default route - proxy all other requests to container (OpenCode server)
 app.all("*", async (c) => {
   const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);

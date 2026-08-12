@@ -2,6 +2,10 @@ name = "opencode-server"
 main = "src/index.ts"
 compatibility_date = "2025-01-14"
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [[containers]]
 class_name = "OpenCodeContainer"
 image = "./Dockerfile"
@@ -24,8 +28,13 @@ crons = ["*/10 * * * *"]
 
 [vars]
 # R2 persistent storage (non-secret config; credentials go in secrets)
-R2_ACCOUNT_ID = "c462a7bcb7dd0bf5eeedb2144b2ac25a"
+R2_ACCOUNT_ID = "<your-cloudflare-account-id>"
 R2_BUCKET_NAME = "opencode-persistent"
+
+# Container application ID for the instance-size/billing APIs. After the first
+# deploy, get it from the CF dashboard (Workers & Pages -> Containers -> app)
+# or the deploy log, and set it here so the instance-type dropdown works.
+CONTAINER_APP_ID = "<your-container-app-id>"
 
 # R2 bucket binding so the worker/admin API can read & write the persisted
 # opencode.json directly (same bucket the container mounts via FUSE)
@@ -36,6 +45,13 @@ bucket_name = "opencode-persistent"
 # Secrets (set via wrangler secret put):
 # - OPENCODE_SERVER_PASSWORD (required for OpenCode server auth)
 # - OPENCODE_API_KEY (OpenCode Zen API key - get from https://opencode.ai/auth)
-# - ADMIN_PASSWORD (optional, for admin UI - defaults to OPENCODE_SERVER_PASSWORD)
+# - ADMIN_EMAIL (optional, universal login email/username for admin + FreeLLMAPI dashboard)
+# - ADMIN_PASSWORD (optional, universal login password for admin + FreeLLMAPI dashboard - defaults to OPENCODE_SERVER_PASSWORD)
 # - GIT_TOKEN (optional, for private git operations)
 # - R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY (required for persistent storage - get from R2 dashboard)
+# - FREELLMAPI_ENCRYPTION_KEY (required for FreeLLMAPI encrypted storage - auto-generated on first deploy)
+# - CF_API_TOKEN (optional, for instance size + billing APIs)
+#
+# ADMIN_EMAIL + ADMIN_PASSWORD are the universal credentials: the admin panel,
+# the OpenCode web UI, and the FreeLLMAPI dashboard all accept them. FreeLLMAPI
+# needs a valid email and a password >= 8 chars.

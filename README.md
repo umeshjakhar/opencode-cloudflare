@@ -7,9 +7,11 @@ Run OpenCode as a persistent web server on Cloudflare Containers, powered by **O
 - Always-on OpenCode web server accessible from anywhere
 - Web UI for browser-based coding assistant
 - **Admin Dashboard** - manage container lifecycle, view status, configuration
+- **FreeLLMAPI dashboard + unified API proxy** - a combined gateway for many providers served at `/freellmapi/*`
 - **OpenCode Zen** - curated, optimized models for coding
+- **Universal credentials** - one email/password for the admin panel, the OpenCode web UI, and the FreeLLMAPI dashboard
 - HTTP Basic Auth for security
-- Persistent storage via R2 + FUSE mount (config, data, and repos survive sleep/restarts)
+- Persistent storage via R2 + FUSE mount (config, data, repos, and the FreeLLMAPI DB survive sleep/restarts)
 - Full REST API + SSE events support
 
 ## Prerequisites
@@ -35,9 +37,12 @@ The table below lists every credential this project uses. Set the required ones 
 | Credential | Required | What it is | How to get it |
 |---|---|---|---|
 | `OPENCODE_API_KEY` | **Yes** | OpenCode Zen API key — billed for LLM usage | 1. Go to [opencode.ai/auth](https://opencode.ai/auth) <br> 2. Sign in and add billing details <br> 3. Create a key and copy it (starts with `sk-`) |
-| `OPENCODE_SERVER_PASSWORD` | **Yes** | Password for the OpenCode web UI (username `opencode`) | Generate a strong one, e.g. `openssl rand -base64 24` |
-| `ADMIN_PASSWORD` | No | Password for `/admin` dashboard (username `opencode` — same as web UI). Defaults to `OPENCODE_SERVER_PASSWORD` if unset | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `OPENCODE_SERVER_PASSWORD` | **Yes** | Password for the OpenCode web UI | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `ADMIN_EMAIL` | No | Universal login email/username — used for the admin panel and the FreeLLMAPI dashboard account (auto-created on boot) | A valid email address |
+| `ADMIN_PASSWORD` | No | Universal login password for admin + FreeLLMAPI dashboard. Defaults to `OPENCODE_SERVER_PASSWORD` if unset. FreeLLMAPI requires **≥ 8 characters** | Generate a strong one, e.g. `openssl rand -base64 24` |
+| `FREELLMAPI_ENCRYPTION_KEY` | Recommended | 64-char hex key that encrypts FreeLLMAPI provider keys at rest. Must be stable across restarts or saved keys become undecryptable. If unset, startup.sh generates one and persists it to R2 | `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `GIT_TOKEN` | Only for private git operations | GitHub Personal Access Token, passed to the container via `git config` insteadOf rules | 1. Go to [github.com/settings/tokens](https://github.com/settings/tokens) <br> 2. "Generate new token" → "Fine-grained" <br> 3. Grant **Contents: Read** on the repos you use <br> 4. Copy the token (starts with `github_pat_` or `ghp_`) |
+| `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | For persistent storage | R2 API token with **Object Read & Write** on your bucket | Cloudflare dashboard → R2 → Manage API Tokens |
 
 > **Note:** Cloudflare secrets are stored encrypted and only exposed inside the container at runtime — the worker itself never returns their values (`/admin/api/config` only reports whether each is set).
 
@@ -49,14 +54,22 @@ Set the required secrets using Wrangler (each command prompts for input):
 # Required: OpenCode Zen API key
 wrangler secret put OPENCODE_API_KEY
 
-# Required: Server password for HTTP Basic Auth
+# Required: Server password (used for OpenCode web UI + admin)
 wrangler secret put OPENCODE_SERVER_PASSWORD
 
-# Optional: Separate admin password (defaults to OPENCODE_SERVER_PASSWORD)
+# Universal login for admin panel + FreeLLMAPI dashboard (>= 8 chars)
+wrangler secret put ADMIN_EMAIL
 wrangler secret put ADMIN_PASSWORD
+
+# Strong, stable key for FreeLLMAPI at-rest encryption (reuse the same value forever)
+wrangler secret put FREELLMAPI_ENCRYPTION_KEY
 
 # Optional: GitHub token for private git operations
 wrangler secret put GIT_TOKEN
+
+# Optional: R2 API credentials (needed for persistent storage)
+wrangler secret put R2_ACCESS_KEY_ID
+wrangler secret put R2_SECRET_ACCESS_KEY
 ```
 
 Verify all secrets were stored:
@@ -110,22 +123,41 @@ https://opencode-server.<your-subdomain>.workers.dev
 
 1. Open `https://opencode-server.<your-subdomain>.workers.dev` in your browser
 2. Enter credentials when prompted:
-   - Username: `opencode`
+   - Username: `ADMIN_EMAIL` (defaults to `opencode` if unset)
    - Password: Your `OPENCODE_SERVER_PASSWORD`
 
 ### Access Admin Dashboard
 
 The Admin Dashboard lets you monitor and control your container:
 1. Open `https://opencode-server.<your-subdomain>.workers.dev/admin` in your browser
-2. Enter admin credentials (same as the OpenCode web UI):
-   - Username: `opencode`
-   - Password: Your `ADMIN_PASSWORD` (or `OPENCODE_SERVER_PASSWORD` if not set)
+2. Enter admin credentials (same universal login as everything else):
+   - Username: `ADMIN_EMAIL` (defaults to `opencode` if unset)
+   - Password: `ADMIN_PASSWORD` (defaults to `OPENCODE_SERVER_PASSWORD` if not set)
 
 **Admin Features:**
 - View container status (running, stopped, uptime)
 - Start/Stop/Restart container controls
 - View configuration and secrets status
 - Quick links to OpenCode Web UI, health check, and API docs
+
+### Access FreeLLMAPI Dashboard
+
+[FreeLLMAPI](https://github.com/kingiu/freellmapi) is served inside the container and
+proxied at `/freellmapi/*`. It gives you one dashboard + one API key to access many
+LLM providers (OpenRouter, Groq, and others), with automatic key rotation and an
+OpenAI-compatible `/v1/chat/completions` endpoint.
+
+1. Open `https://opencode-server.<your-subdomain>.workers.dev/freellmapi/` in your browser
+2. Log in with your **universal credentials**:
+   - Email/Username: `ADMIN_EMAIL`
+   - Password: `ADMIN_PASSWORD`
+3. On first boot the dashboard account is auto-created from `ADMIN_EMAIL` / `ADMIN_PASSWORD` — no setup code needed.
+4. Add your provider API keys in the dashboard and grab your unified API key from the
+   **API Keys** page to use with any OpenAI-compatible client.
+
+> **Note:** FreeLLMAPI requires a valid email and a password **≥ 8 characters** — your
+> `ADMIN_PASSWORD` must meet that or dashboard login will fail. Also, changing
+> `ADMIN_EMAIL`/`ADMIN_PASSWORD` only takes effect on the next container restart.
 
 ### API Access
 
@@ -134,15 +166,15 @@ The Admin Dashboard lets you monitor and control your container:
 curl https://opencode-server.<your-subdomain>.workers.dev/worker-health
 
 # Container health (requires OpenCode auth)
-curl -u opencode:YOUR_PASSWORD \
+curl -u ADMIN_EMAIL:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/global/health
 
-# Admin API - Get status (requires admin auth, username `opencode`)
-curl -u opencode:YOUR_PASSWORD \
+# Admin API - Get status (requires admin auth, username ADMIN_EMAIL)
+curl -u ADMIN_EMAIL:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/admin/api/status
 
 # Restart the container
-curl -X POST -u opencode:YOUR_PASSWORD \
+curl -X POST -u ADMIN_EMAIL:YOUR_PASSWORD \
   https://opencode-server.<your-subdomain>.workers.dev/admin/api/restart
 ```
 
@@ -180,7 +212,10 @@ persist across restarts (stored in the Durable Object).
 
 > **Storage:** data lives in R2 via the FUSE mount. After sleeping, the container
 > restarts with a fresh ephemeral disk, but `~/.config/opencode`,
-> `~/.local/share/opencode`, and repos under `/mnt/r2/repos` persist.
+> `~/.local/share/opencode`, repos under `/mnt/r2/repos`, and the FreeLLMAPI DB
+> (`/mnt/r2/.freellmapi/freeapi.db`) all persist. FreeLLMAPI writes are periodically
+> checkpointed to the main DB file (every 30s + on graceful shutdown) so recent
+> dashboard changes survive restarts.
 
 ## Configuration
 
@@ -272,7 +307,9 @@ wrangler secret list
 Should show:
 - `OPENCODE_SERVER_PASSWORD`
 - `OPENCODE_API_KEY`
+- `ADMIN_EMAIL` (optional)
 - `ADMIN_PASSWORD` (optional)
+- `FREELLMAPI_ENCRYPTION_KEY` (optional)
 
 ### Model not working
 

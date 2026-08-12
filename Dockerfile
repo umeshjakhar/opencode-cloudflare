@@ -1,8 +1,13 @@
-FROM node:20-alpine
+FROM node:20-bookworm-slim
 
-# Install dependencies: git for cloning, curl for health checks,
-# fuse + tigrisfs for mounting an R2 bucket for persistent storage
-RUN apk add --no-cache git curl bash fuse ca-certificates
+# Install build/runtime deps:
+#  - git, curl, bash, ca-certificates: basics
+#  - fuse: R2 mount via tigrisfs
+#  - python3, make, g++: compile better-sqlite3 (native module, optional dep)
+#    from source at first boot when no prebuilt binary is available
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl bash fuse ca-certificates python3 make g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install tigrisfs (FUSE adapter for R2/S3-compatible storage)
 RUN ARCH=$(uname -m) && \
@@ -25,13 +30,20 @@ RUN mkdir -p /home/dev/.config/opencode \
 # Copy OpenCode config (uses Zen as provider)
 COPY --chown=root:root opencode.json /home/dev/.config/opencode/opencode.json
 
-# Copy startup script (mounts R2 and starts server)
+# Copy startup script (mounts R2, clones+builds+starts freellmapi on boot)
 COPY --chown=root:root startup.sh /home/dev/startup.sh
 RUN chmod +x /home/dev/startup.sh
 
+# FreeLLMAPI helpers: periodic WAL checkpoint (persists dashboard edits to R2)
+# and dashboard account provisioning from the universal admin credentials.
+COPY --chown=root:root db-checkpoint.js ensure-user.js /home/dev/
+
 EXPOSE 4096
 
-HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
+# Health check stays on OpenCode (4096) so the container is "healthy" the whole
+# time freellmapi is building in the background on first boot. A check on 3001
+# would roll the deployment back before the build finishes.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
   CMD curl -f http://localhost:4096/global/health || exit 1
 
 ENTRYPOINT ["/home/dev/startup.sh"]
