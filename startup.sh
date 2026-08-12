@@ -115,7 +115,10 @@ JSON
       DB_PATH=/mnt/r2/.freellmapi/freeapi.db
       KEY_FILE=/mnt/r2/.freellmapi/encryption_key
       mkdir -p /mnt/r2/.freellmapi
-      exec >> "$LOG_FILE" 2>&1
+      # Tee output to both the R2 log file (persisted, per-boot record read by
+      # /debug/freellmapi-log) AND the container's stdout so wrangler tail shows
+      # boot output in real time without waiting for the FUSE->R2 sync.
+      exec > >(tee -a "$LOG_FILE") 2>&1
 
       echo "=== freellmapi boot $(date -u +%FT%TZ) ==="
       if [ ! -d "$FREEL/.git" ]; then
@@ -218,5 +221,11 @@ else
 fi
 
 # Start OpenCode web server
+# Universal creds: username comes from OPENCODE_SERVER_USERNAME (defaults to
+# "opencode"), password from OPENCODE_SERVER_PASSWORD. Align the username with
+# the universal ADMIN_EMAIL so one login works everywhere.
 echo "Starting OpenCode web server..."
+if [ -n "$ADMIN_EMAIL" ]; then
+  export OPENCODE_SERVER_USERNAME="$ADMIN_EMAIL"
+fi
 exec opencode web --port 4096 --hostname 0.0.0.0
