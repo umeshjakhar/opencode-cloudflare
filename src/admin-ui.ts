@@ -419,6 +419,12 @@ export function getAdminHTML(): string {
         return;
       }
       
+      const serviceUrls = {
+        'opencode-server': '/global/health',
+        'opencode-webui': '/',
+        'freellmapi-server': '/freellmapi/api/auth/status',
+        'freellmapi-webui': '/freellmapi/',
+      };
       const rows = data.services.map(s => {
         const status = s.status || 'down';
         const dotClass = status === 'up' ? 'bg-green-500'
@@ -426,11 +432,15 @@ export function getAdminHTML(): string {
           : 'bg-red-500';
         const labelClass = 'status-' + status;
         const note = s.note ? ' <span class="text-xs text-gray-500">(' + s.note + ')</span>' : '';
+        const url = serviceUrls[s.id];
+        const nameHtml = url
+          ? '<a href="' + url + '" target="_blank" class="text-sm font-medium hover:text-blue-400 hover:underline flex items-center gap-1.5 transition-colors" title="Open in new tab">' + s.name + '<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg></a>'
+          : '<span class="text-sm font-medium">' + s.name + '</span>';
         return \`
           <div class="flex items-center justify-between bg-gray-900/50 rounded-lg px-4 py-3 border border-gray-800">
             <div class="flex items-center gap-3">
               <div class="w-3 h-3 rounded-full \${dotClass}\${status === 'up' ? '' : ' pulse'}"></div>
-              <span class="text-sm font-medium">\${s.name}</span>
+              \${nameHtml}
             </div>
             <div class="flex items-center gap-4 text-sm">
               <span class="text-xs text-gray-500">\${s.statusCode !== null && s.statusCode !== undefined ? 'HTTP ' + s.statusCode : ''}</span>
