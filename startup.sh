@@ -17,7 +17,14 @@ if [ -n "$R2_ACCOUNT_ID" ] && [ -n "$R2_BUCKET_NAME" ] \
   echo "Mounting R2 bucket ${R2_BUCKET_NAME} with tigrisfs..."
   mkdir -p "$R2_MOUNT"
   R2_ENDPOINT="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
-  tigrisfs --endpoint "$R2_ENDPOINT" -f "$R2_BUCKET_NAME" "$R2_MOUNT" &
+  # tigrisfs speaks the S3 protocol and expects AWS_* env vars. Scope them to
+  # this process only (via exec in a subshell) so opencode never sees them and
+  # doesn't falsely report Amazon Bedrock as configured.
+  (
+    export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+    export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+    exec tigrisfs --endpoint "$R2_ENDPOINT" -f "$R2_BUCKET_NAME" "$R2_MOUNT"
+  ) &
   sleep 3
 
   # Verify the mount is actually up

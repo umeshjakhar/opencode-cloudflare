@@ -333,7 +333,7 @@ export function getAdminHTML(): string {
           <div class="bg-gray-900/50 rounded-lg p-4">
             <div class="flex items-center gap-3 mb-3">
               <div class="w-4 h-4 rounded-full \${isRunning ? 'bg-green-500' : 'bg-red-500'}"></div>
-              <span class="text-lg font-semibold \${statusClass}">\${(data.status || 'unknown').toUpperCase()}</span>
+              <span class="text-lg font-semibold \${statusClass}">\${(data.status || 'unknown').charAt(0).toUpperCase() + (data.status || 'unknown').slice(1)}</span>
             </div>
             <div class="space-y-2 text-sm">
               <div class="flex justify-between">

@@ -98,8 +98,6 @@ export class OpenCodeContainer extends Container<Env> {
       R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
       R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
       R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
-      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
-      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     // Call the parent fetch which handles container lifecycle
@@ -202,8 +200,6 @@ export class OpenCodeContainer extends Container<Env> {
       R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
       R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
       R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
-      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
-      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     await this.startAndWaitForPorts({
@@ -271,8 +267,6 @@ export class OpenCodeContainer extends Container<Env> {
       R2_BUCKET_NAME: this.env.R2_BUCKET_NAME || "",
       R2_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
       R2_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
-      AWS_ACCESS_KEY_ID: this.env.R2_ACCESS_KEY_ID || "",
-      AWS_SECRET_ACCESS_KEY: this.env.R2_SECRET_ACCESS_KEY || "",
     };
 
     await this.startAndWaitForPorts({
