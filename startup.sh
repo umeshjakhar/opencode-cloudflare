@@ -104,18 +104,21 @@ JSON
       ) &
     fi
 
-    # --- FreeLLMAPI: clone, install, persistent key, .env, build, run -------
+    # --- FreeLLMAPI: baked in the image, .env + run on boot ------------------
     # Server listens on 3001. Worker proxies /freellmapi/* -> 3001.
+    #
+    # The app code + build outputs are baked into the image (see Dockerfile), so
+    # on boot we only need to restore the .env (ENCRYPTION_KEY) and start the
+    # server - no clone/install/build. The steps below remain as a fallback in
+    # case the bake is ever missing from an image.
     #
     # The app's CONFIG persists in R2: it lives in the SQLite DB (freeapi.db).
     # To keep provider keys decryptable across restarts, ENCRYPTION_KEY is
     # persisted too (next to the DB in R2) and reused on every boot.
-    # The code itself is ephemeral - re-cloned and rebuilt on each boot.
     #
     # Boot runs in a background subshell so the container (opencode on 4096)
-    # stays healthy during the first boot. ALL boot output (clone/install/
-    # build/server) goes to the R2 log file so it's visible via
-    # /debug/freellmapi-log.
+    # stays healthy during first boot. ALL boot output (clone/install/build/
+    # server) goes to the R2 log file so it's visible via /debug/freellmapi-log.
     (
       FREEL=/home/dev/freellmapi
       LOG_FILE=/mnt/r2/.freellmapi/freellmapi.log
@@ -128,17 +131,18 @@ JSON
       exec > >(tee -a "$LOG_FILE") 2>&1
 
       echo "=== freellmapi boot $(date -u +%FT%TZ) ==="
-      if [ ! -d "$FREEL/.git" ]; then
-        echo "[1/5] git clone https://github.com/tashfeenahmed/freellmapi.git"
+      if [ ! -f "$FREEL/server/dist/index.js" ]; then
+        echo "[1/5] freellmapi build not present in image, cloning + installing (fallback)"
+        rm -rf "$FREEL"
         git clone https://github.com/tashfeenahmed/freellmapi.git "$FREEL" || { echo "git clone FAILED"; exit 1; }
       else
-        echo "[1/5] freellmapi already cloned, skipping"
+        echo "[1/5] freellmapi baked in image, skipping clone"
       fi
 
       cd "$FREEL"
 
       if [ ! -d node_modules ]; then
-        echo "[2/5] npm install (this can take several minutes)"
+        echo "[2/5] node_modules missing, npm install (can take several minutes)"
         npm install 2>&1 || { echo "npm install FAILED"; exit 1; }
       else
         echo "[2/5] node_modules present, skipping install"
@@ -159,14 +163,14 @@ JSON
       echo ".env written (key length: ${#ENCRYPTION_KEY})"
 
       if [ ! -f server/dist/index.js ] || [ ! -d client/dist ]; then
-        echo "[4/5] npm run build (VITE_BASE=/freellmapi/)"
+        echo "[4/5] build outputs missing, npm run build (VITE_BASE=/freellmapi/, fallback)"
         # VITE_BASE makes the dashboard's assets + API calls root at
         # /freellmapi/... so they route through the worker's /freellmapi/* proxy
         # instead of resolving to the domain root (blank page).
         export VITE_BASE=/freellmapi/
         npm run build 2>&1 || { echo "npm run build FAILED"; exit 1; }
       else
-        echo "[4/5] server/dist exists, skipping build"
+        echo "[4/5] build outputs present, skipping build"
       fi
 
       echo "[5/5] starting node server/dist/index.js on port 3001"

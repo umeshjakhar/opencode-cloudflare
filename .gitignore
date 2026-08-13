@@ -13,6 +13,9 @@ worker-configuration.d.ts
 .env.local
 .dev.vars
 
+# Local runtime copy of the R2-persisted OpenCode config (contains API keys)
+opencode-config/
+
 # OS files
 .DS_Store
 Thumbs.db

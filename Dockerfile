@@ -30,7 +30,23 @@ RUN mkdir -p /home/dev/.config/opencode \
 # Copy OpenCode config (uses Zen as provider)
 COPY --chown=root:root opencode.json /home/dev/.config/opencode/opencode.json
 
-# Copy startup script (mounts R2, clones+builds+starts freellmapi on boot)
+# --- FreeLLMAPI: baked into the image so every container wake starts the server
+# instantly instead of re-cloning + re-installing + rebuilding the app (minutes
+# of billed runtime + no working provider on every cold start). Pinned to a
+# commit for reproducibility - bump deliberately to update:
+#   https://github.com/tashfeenahmed/freellmapi
+# VITE_BASE must match the worker's /freellmapi/* proxy path or the dashboard
+# serves a blank page. better-sqlite3 (optional dep) compiles from source here,
+# so the build arch == runtime arch and no boot-time compile is needed.
+RUN git clone https://github.com/tashfeenahmed/freellmapi.git /home/dev/freellmapi \
+    && cd /home/dev/freellmapi \
+    && git checkout 0a8a3f77223fc6522f44ed0fa963712b11ad34cb \
+    && npm ci \
+    && VITE_BASE=/freellmapi/ npm run build \
+    && npm prune --omit=dev \
+    && rm -rf .git
+
+# Copy startup script (mounts R2, starts freellmapi + opencode on boot)
 COPY --chown=root:root startup.sh /home/dev/startup.sh
 RUN chmod +x /home/dev/startup.sh
 
@@ -41,9 +57,9 @@ COPY --chown=root:root db-checkpoint.js ensure-user.js ensure-opencode-config.js
 
 EXPOSE 4096
 
-# Health check stays on OpenCode (4096) so the container is "healthy" the whole
-# time freellmapi is building in the background on first boot. A check on 3001
-# would roll the deployment back before the build finishes.
+# Health check stays on OpenCode (4096). freellmapi is baked in now, so 4096 is
+# up within seconds of boot; a check on 3001 would fail before the FUSE mount +
+# server start finishes.
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
   CMD curl -f http://localhost:4096/global/health || exit 1
 

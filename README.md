@@ -142,7 +142,7 @@ The Admin Dashboard lets you monitor and control your container:
 
 ### Access FreeLLMAPI Dashboard
 
-[FreeLLMAPI](https://github.com/kingiu/freellmapi) is served inside the container and
+[FreeLLMAPI](https://github.com/tashfeenahmed/freellmapi) is served inside the container and
 proxied at `/freellmapi/*`. It gives you one dashboard + one API key to access many
 LLM providers (OpenRouter, Groq, and others), with automatic key rotation and an
 OpenAI-compatible `/v1/chat/completions` endpoint.
@@ -162,6 +162,13 @@ On every boot, `ensure-opencode-config.js` injects the `freellmapi` provider int
 model to `freellmapi/auto`. If you change the model in the admin panel afterwards, your
 choice is preserved. The base URL is `http://127.0.0.1:3001/v1` since both apps share
 the container.
+
+**FreeLLMAPI is baked into the image** (see `Dockerfile`): the app is cloned at a pinned
+commit, `npm ci`'d, and built (`VITE_BASE=/freellmapi/`) at image build time. Because
+Container disk is ephemeral, a boot-time clone/install/build would otherwise repeat on
+*every* wake from sleep (minutes of billed runtime + no working model provider each
+time). Baked in, a cold start only needs to write `.env` and launch the server. To
+update FreeLLMAPI, bump the pinned commit in the `Dockerfile` and redeploy.
 
 > **Note:** FreeLLMAPI requires a valid email and a password **≥ 8 characters** — your
 > `ADMIN_PASSWORD` must meet that or dashboard login will fail. Also, changing
