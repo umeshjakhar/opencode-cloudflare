@@ -9,6 +9,7 @@ export function getAdminHTML(): string {
   <style>
     .status-healthy { color: #4ade80; }
     .status-running { color: #facc15; }
+    .status-degraded { color: #facc15; }
     .status-stopped { color: #f87171; }
     .status-stopping { color: #fb923c; }
     .status-unknown { color: #9ca3af; }
@@ -47,6 +48,25 @@ export function getAdminHTML(): string {
           <span class="text-gray-400">Loading status...</span>
         </div>
 </div>
+    </div>
+
+    <!-- Services Health -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Services Health</h2>
+        <div class="flex items-center gap-3">
+          <span id="services-timestamp" class="text-xs text-gray-500">no data</span>
+          <button 
+            onclick="refreshServices()" 
+            class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
+      </div>
+      <div id="services" class="space-y-2">
+        <p class="text-gray-400">Loading services health...</p>
+      </div>
     </div>
 
     <!-- Live Workload -->
@@ -371,6 +391,58 @@ export function getAdminHTML(): string {
       btnStart.disabled = isRunning || isStopping;
       btnStop.disabled = !isRunning || isStopping;
       btnRestart.disabled = isStopping;
+    }
+    
+    async function refreshServices() {
+      const data = await fetchAPI('/services');
+      const div = document.getElementById('services');
+      const tsSpan = document.getElementById('services-timestamp');
+      
+      if (data.error) {
+        div.innerHTML = \`
+          <div class="bg-red-900/30 border border-red-700 rounded p-3">
+            <p class="text-red-400 font-medium">Error fetching services health</p>
+            <p class="text-red-300 text-sm mt-1">\${data.error}</p>
+          </div>
+        \`;
+        if (tsSpan) tsSpan.textContent = 'error';
+        return;
+      }
+      
+      if (tsSpan) {
+        const ago = Math.max(0, Math.floor(Date.now() / 1000) - Math.floor((data.checkedAt || 0) / 1000));
+        tsSpan.textContent = ago < 2 ? 'just now' : ago + 's ago';
+      }
+      
+      if (!data.services || !data.services.length) {
+        div.innerHTML = '<p class="text-gray-400">No service data</p>';
+        return;
+      }
+      
+      const rows = data.services.map(s => {
+        const status = s.status || 'down';
+        const dotClass = status === 'up' ? 'bg-green-500'
+          : status === 'degraded' ? 'bg-yellow-500'
+          : 'bg-red-500';
+        const labelClass = 'status-' + status;
+        const note = s.note ? ' <span class="text-xs text-gray-500">(' + s.note + ')</span>' : '';
+        return \`
+          <div class="flex items-center justify-between bg-gray-900/50 rounded-lg px-4 py-3 border border-gray-800">
+            <div class="flex items-center gap-3">
+              <div class="w-3 h-3 rounded-full \${dotClass}\${status === 'up' ? '' : ' pulse'}"></div>
+              <span class="text-sm font-medium">\${s.name}</span>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+              <span class="text-xs text-gray-500">\${s.statusCode !== null && s.statusCode !== undefined ? 'HTTP ' + s.statusCode : ''}</span>
+              <span class="text-xs text-gray-500">\${s.responseTimeMs !== null && s.responseTimeMs !== undefined ? s.responseTimeMs + 'ms' : ''}</span>
+              <span class="font-semibold \${labelClass}">\${status.toUpperCase()}</span>
+              \${note}
+            </div>
+          </div>
+        \`;
+      }).join('');
+      
+      div.innerHTML = rows;
     }
     
     async function refreshConfig() {
@@ -833,7 +905,10 @@ export function getAdminHTML(): string {
     // Start auto-refresh
     function startAutoRefresh() {
       if (autoRefreshInterval) clearInterval(autoRefreshInterval);
-      autoRefreshInterval = setInterval(refreshStatus, 30000); // Every 30 seconds
+      autoRefreshInterval = setInterval(() => {
+        refreshStatus();
+        refreshServices();
+      }, 30000); // Every 30 seconds
     }
 
     function metricsBar(percent, color) {
@@ -975,6 +1050,7 @@ export function getAdminHTML(): string {
 
     // Initial load
     refreshStatus();
+    refreshServices();
     refreshConfig();
     refreshPower();
     refreshBilling();
@@ -986,6 +1062,7 @@ export function getAdminHTML(): string {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         refreshStatus();
+        refreshServices();
         refreshConfig();
         refreshPower();
         refreshBilling();

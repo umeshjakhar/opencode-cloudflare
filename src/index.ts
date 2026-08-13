@@ -445,6 +445,101 @@ app.get("/admin/api/status", async (c) => {
   }
 });
 
+// Admin API - services health: probes each service inside the running
+// container and reports up/degraded/down with HTTP status + latency.
+const SERVICE_PROBES = [
+  { id: "opencode-server", name: "OpenCode Server", port: 4096, path: "/config" },
+  { id: "opencode-webui", name: "OpenCode Web UI", port: 4096, path: "/" },
+  { id: "freellmapi-server", name: "FreeLLMAPI Server", port: 3001, path: "/api/auth/status" },
+  { id: "freellmapi-webui", name: "FreeLLMAPI Web UI", port: 3001, path: "/" },
+] as const;
+
+app.get("/admin/api/services", async (c) => {
+  const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
+
+  // Don't probe if the container isn't running (probing a stopped container
+  // would trigger a start). Check state first.
+  let running = false;
+  try {
+    const statusRes = await container.fetch(
+      new Request("http://localhost/__admin/status")
+    );
+    const status = (await statusRes.json()) as { running?: boolean };
+    running = status.running === true;
+  } catch {
+    running = false;
+  }
+
+  const withTimeout = <T>(p: Promise<T>, ms: number): Promise<T> =>
+    Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`timed out after ${ms}ms`)), ms)
+      ),
+    ]);
+
+  const services = [];
+  for (const svc of SERVICE_PROBES) {
+    if (!running) {
+      services.push({
+        ...svc,
+        status: "down",
+        statusCode: null,
+        responseTimeMs: null,
+        note: "container not running",
+      });
+      continue;
+    }
+
+    const start = Date.now();
+    let result: {
+      status: string;
+      statusCode: number | null;
+      responseTimeMs: number;
+      note: string | null;
+    };
+    try {
+      // switchPort sets the cf-container-target-port header that the container
+      // binding uses to pick the target port (the URL port alone is ignored).
+      const request = new Request(`http://localhost${svc.path}`);
+      // The OpenCode web server requires password auth; the universal admin
+      // creds work for it, so the check reports "up" instead of a 401.
+      const needsAuth = svc.port === 4096;
+      if (needsAuth && (c.env.ADMIN_EMAIL || c.env.ADMIN_PASSWORD)) {
+        const creds = btoa(
+          `${c.env.ADMIN_EMAIL}:${c.env.ADMIN_PASSWORD}`
+        );
+        request.headers.set("Authorization", `Basic ${creds}`);
+      }
+      const res = await withTimeout(
+        container.fetch(switchPort(request, svc.port)),
+        5000
+      );
+      if (res.status >= 200 && res.status < 400) {
+        result = { status: "up", statusCode: res.status, responseTimeMs: Date.now() - start, note: null };
+      } else if (res.status >= 400 && res.status < 500) {
+        result = { status: "degraded", statusCode: res.status, responseTimeMs: Date.now() - start, note: `HTTP ${res.status}` };
+      } else {
+        result = { status: "down", statusCode: res.status, responseTimeMs: Date.now() - start, note: `HTTP ${res.status}` };
+      }
+    } catch (error) {
+      result = {
+        status: "down",
+        statusCode: null,
+        responseTimeMs: Date.now() - start,
+        note: error instanceof Error ? error.message : String(error),
+      };
+    }
+    services.push({ ...svc, ...result });
+  }
+
+  return c.json({
+    running,
+    checkedAt: Date.now(),
+    services,
+  });
+});
+
 app.post("/admin/api/start", async (c) => {
   try {
     const container = getContainer(c.env.OPENCODE_CONTAINER, SHARED_CONTAINER_ID);
