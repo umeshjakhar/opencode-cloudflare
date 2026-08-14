@@ -64,3 +64,8 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=60s \
   CMD curl -f http://localhost:4096/global/health || exit 1
 
 ENTRYPOINT ["/home/dev/startup.sh"]
+# force-rebuild
+# cf-force-rebuild
+ # rebuild-trigger-1786684192
+# force-rebuild 1786684245
+# rebuild
