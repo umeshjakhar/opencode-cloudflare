@@ -1,4 +1,5 @@
 import { Container, getContainer, switchPort } from "@cloudflare/containers";
+import { env } from "cloudflare:workers";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { basicAuth } from "hono/basic-auth";
@@ -36,6 +37,42 @@ export class OpenCodeContainer extends Container<Env> {
   defaultPort = 4096;
   sleepAfter = "24h"; // Keep running (essentially always-on)
   enableInternet = true; // Required for LLM API calls
+
+  // Declared as a class field (not set at runtime) so Cloudflare persists
+  // these env vars in the container application config and applies them on
+  // EVERY instance launch - including restarts triggered by rollouts (e.g.
+  // instance-type changes). Runtime `this.envVars` assignments are lost when
+  // Cloudflare restarts the container itself.
+  envVars: Record<string, string> = {
+    // OpenCode server config
+    OPENCODE_SERVER_PASSWORD: (env as Env).OPENCODE_SERVER_PASSWORD || "",
+    OPENCODE_PERMISSION: '{"edit":"allow","bash":"allow","write":"allow"}',
+    OPENCODE_DISABLE_AUTOUPDATE: "true",
+
+    // OpenCode Zen API key
+    OPENCODE_API_KEY: (env as Env).OPENCODE_API_KEY || "",
+
+    // Git token for private repo operations
+    GIT_TOKEN: (env as Env).GIT_TOKEN || "",
+
+    // Universal dashboard/admin credentials - the SAME login for the OpenCode
+    // web UI, the admin panel, and the FreeLLMAPI dashboard. Rotate them from
+    // Cloudflare -> Workers -> Settings -> Variables (secrets). startup.sh
+    // auto-provisions the FreeLLMAPI account from these on every boot.
+    ADMIN_EMAIL: (env as Env).ADMIN_EMAIL || "",
+    ADMIN_PASSWORD: (env as Env).ADMIN_PASSWORD || "",
+
+    // Encryption key for FreeLLMAPI at-rest key storage. Persist it once via
+    // wrangler secret put; startup.sh reuses it so saved keys stay
+    // decryptable across container restarts.
+    FREELLMAPI_ENCRYPTION_KEY: (env as Env).FREELLMAPI_ENCRYPTION_KEY || "",
+
+    // R2 persistent storage (FUSE mount)
+    R2_ACCOUNT_ID: (env as Env).R2_ACCOUNT_ID || "",
+    R2_BUCKET_NAME: (env as Env).R2_BUCKET_NAME || "",
+    R2_ACCESS_KEY_ID: (env as Env).R2_ACCESS_KEY_ID || "",
+    R2_SECRET_ACCESS_KEY: (env as Env).R2_SECRET_ACCESS_KEY || "",
+  };
 
   private startTime: number | null = null;
 
