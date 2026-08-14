@@ -49,7 +49,12 @@ if [ -n "$R2_ACCOUNT_ID" ] && [ -n "$R2_BUCKET_NAME" ] \
       cp /home/dev/.config/opencode/opencode.json "$R2_MOUNT/opencode-config/opencode.json"
     fi
 
-    # Symlink ephemeral paths to the persistent mount
+    # Replace the baked-in real directories with symlinks to the persistent
+    # mount. These are REAL dirs baked into the image (with the default config),
+    # so they MUST be removed first: `ln -sfn` alone would create a NESTED
+    # symlink inside the existing dir, leaving opencode reading the stale baked
+    # config instead of the R2 one.
+    rm -rf /home/dev/.config/opencode /home/dev/.local/share/opencode
     ln -sfn "$R2_MOUNT/opencode-data"   /home/dev/.local/share/opencode
     ln -sfn "$R2_MOUNT/opencode-config" /home/dev/.config/opencode
 
@@ -206,6 +211,10 @@ JSON
       # Wire FreeLLMAPI into OpenCode automatically (provider + default model).
       # Needs the unified API key, so it runs only after the server is up.
       node /home/dev/ensure-opencode-config.js || echo "[ensure-opencode-config] failed (non-fatal)"
+      # Signal opencode that the config is synced. opencode reads its config
+      # once at startup and does not reload, so it must NOT boot before this
+      # marker exists or it will serve the stale baked-in default config.
+      touch /tmp/opencode-config-synced
 
       # Periodic WAL checkpoint so dashboard edits land in the main DB file
       # (which tigrisfs syncs to R2) instead of the volatile -wal sidecar.
@@ -239,4 +248,30 @@ echo "Starting OpenCode web server..."
 if [ -n "$ADMIN_EMAIL" ]; then
   export OPENCODE_SERVER_USERNAME="$ADMIN_EMAIL"
 fi
+
+# opencode reads its config once at startup and does NOT reload on change. Wait
+# for the freellmapi boot subshell to write the synced config (it sets
+# /tmp/opencode-config-synced after wiring the freellmapi provider + model) so
+# opencode boots with the correct model/provider instead of the stale baked-in
+# default. Bounded wait so opencode still starts if the sync never happens.
+# Only applies when R2 is mounted (the symlink exists); on warm boots the R2
+# config already contains freellmapi, so the wait is skipped.
+if [ -n "$R2_ACCOUNT_ID" ] && [ -L /home/dev/.config/opencode ] && [ ! -f /tmp/opencode-config-synced ]; then
+  if grep -q '"freellmapi"' /home/dev/.config/opencode/opencode.json 2>/dev/null; then
+    echo "opencode config already synced (freellmapi present)"
+  else
+    echo "Waiting for opencode config sync before starting opencode..."
+    for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+      if [ -f /tmp/opencode-config-synced ]; then
+        echo "opencode config synced (freellmapi provider + model wired)"
+        break
+      fi
+      sleep 2
+    done
+    if [ ! -f /tmp/opencode-config-synced ]; then
+      echo "WARNING: opencode config sync did not complete; starting opencode anyway"
+    fi
+  fi
+fi
+
 exec opencode web --port 4096 --hostname 0.0.0.0

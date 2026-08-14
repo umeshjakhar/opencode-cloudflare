@@ -58,7 +58,7 @@ config.provider.freellmapi = {
     apiKey: unifiedKey,
   },
   models: {
-    auto: { name: "Auto", limit: { context: 128000 } },
+    auto: { name: "Auto", limit: { context: 128000, output: 32768 } },
   },
 };
 

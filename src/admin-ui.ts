@@ -515,7 +515,7 @@ export function getAdminHTML(): string {
           <div class="text-sm">
             <div class="flex justify-between items-center mb-3">
               <span class="text-gray-400">Model:</span>
-              <span class="font-mono text-xs bg-gray-800 px-2 py-1 rounded">\${data.containerConfig?.model || 'opencode/claude-sonnet-4'}</span>
+              <span id="opencode-config-model" class="font-mono text-xs bg-gray-800 px-2 py-1 rounded">\${data.containerConfig?.model || 'opencode/claude-sonnet-4'}</span>
             </div>
             <textarea
               id="opencode-config-editor"
@@ -568,6 +568,18 @@ export function getAdminHTML(): string {
       if (editor) {
         editor.value = data.content || '';
         editor.placeholder = '';
+      }
+      const modelEl = document.getElementById('opencode-config-model');
+      if (modelEl && data.content) {
+        try {
+          const parsed = JSON.parse(data.content);
+          modelEl.textContent = parsed.model || 'none set';
+          modelEl.className =
+            'font-mono text-xs bg-gray-800 px-2 py-1 rounded ' +
+            (parsed.model ? 'text-green-400' : 'text-yellow-400');
+        } catch {
+          modelEl.textContent = 'unparseable';
+        }
       }
       if (msg) {
         msg.textContent = data.persisted
