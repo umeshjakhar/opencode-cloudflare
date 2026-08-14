@@ -6,6 +6,8 @@ export function getAdminHTML(): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>OpenCode Container Admin</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/editor/editor.main.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js"></script>
   <style>
     .status-healthy { color: #4ade80; }
     .status-running { color: #facc15; }
@@ -15,6 +17,7 @@ export function getAdminHTML(): string {
     .status-unknown { color: #9ca3af; }
     .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
     @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    #opencode-config-editor { height: 360px; }
   </style>
 </head>
 <body class="bg-gray-900 text-white min-h-screen">
@@ -207,6 +210,47 @@ export function getAdminHTML(): string {
       </div>
       <div id="config" class="space-y-4">
         <p class="text-gray-400">Loading configuration...</p>
+      </div>
+    </div>
+
+    <!-- OpenCode Configuration Editor -->
+    <div class="bg-gray-800 rounded-lg p-6 mb-6 border border-gray-700">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-medium text-gray-300">OpenCode Configuration</h3>
+        <button
+          onclick="loadOpenCodeConfig()"
+          class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
+        >
+          Refresh
+        </button>
+      </div>
+      <div class="flex items-center justify-between mb-3">
+        <span class="text-gray-400 text-sm">Model:</span>
+        <span id="opencode-config-model" class="font-mono text-xs bg-gray-800 px-2 py-1 rounded text-gray-300">opencode/claude-sonnet-4</span>
+      </div>
+      <div id="opencode-config-editor" class="w-full border border-gray-700 rounded-lg overflow-hidden bg-gray-900/50"></div>
+      <div class="flex items-center justify-between mt-3">
+        <div id="opencode-config-msg" class="text-xs text-gray-500"></div>
+        <div class="flex gap-2">
+          <button
+            onclick="formatOpenCodeConfig()"
+            class="text-sm bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded transition-colors"
+          >
+            Format
+          </button>
+          <button
+            onclick="saveOpenCodeConfig()"
+            class="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition-colors"
+          >
+            Save
+          </button>
+          <button
+            onclick="saveOpenCodeConfig(true)"
+            class="text-sm bg-green-700 hover:bg-green-600 px-4 py-2 rounded transition-colors"
+          >
+            Save &amp; Restart
+          </button>
+        </div>
       </div>
     </div>
 
@@ -501,61 +545,95 @@ export function getAdminHTML(): string {
             </div>
           </div>
         </div>
-        
-        <div class="mt-4 bg-gray-900/50 rounded-lg p-4">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="font-medium text-gray-300">OpenCode Configuration</h3>
-            <button
-              onclick="loadOpenCodeConfig()"
-              class="text-sm bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded transition-colors"
-            >
-              Refresh
-            </button>
-          </div>
-          <div class="text-sm">
-            <div class="flex justify-between items-center mb-3">
-              <span class="text-gray-400">Model:</span>
-              <span id="opencode-config-model" class="font-mono text-xs bg-gray-800 px-2 py-1 rounded">\${data.containerConfig?.model || 'opencode/claude-sonnet-4'}</span>
-            </div>
-            <textarea
-              id="opencode-config-editor"
-              rows="14"
-              spellcheck="false"
-              class="w-full bg-gray-800 border border-gray-700 rounded-lg p-3 font-mono text-xs text-gray-200 focus:outline-none focus:border-blue-500"
-              placeholder="Loading configuration..."
-            ></textarea>
-            <div class="flex items-center justify-between mt-3">
-              <div id="opencode-config-msg" class="text-xs text-gray-500"></div>
-              <div class="flex gap-2">
-                <button
-                  onclick="saveOpenCodeConfig()"
-                  class="text-sm bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded transition-colors"
-                >
-                  Save
-                </button>
-                <button
-                  onclick="saveOpenCodeConfig(true)"
-                  class="text-sm bg-green-700 hover:bg-green-600 px-4 py-2 rounded transition-colors"
-                >
-                  Save & Restart
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
       \`;
-      loadOpenCodeConfig();
     }
     
     const SLEEP_PRESETS = ['10m', '30m', '1h', '6h', '24h'];
 
-    async function loadOpenCodeConfig() {
-      const editor = document.getElementById('opencode-config-editor');
+    let openCodeEditor = null;
+    let openCodeEditorReady = false;
+
+    function initOpenCodeEditor() {
+      const container = document.getElementById('opencode-config-editor');
       const msg = document.getElementById('opencode-config-msg');
-      if (editor) {
-        editor.placeholder = 'Loading configuration...';
-        editor.value = '';
+      if (!container) return;
+      if (typeof require === 'undefined' || typeof require.config !== 'function') {
+        container.innerHTML = '<textarea id="opencode-config-editor-textarea" rows="14" spellcheck="false" class="w-full bg-gray-800 p-3 font-mono text-xs text-gray-200 focus:outline-none" placeholder="Editor failed to load. Using basic editor."></textarea>';
+        openCodeEditorReady = true;
+        return;
       }
+      require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs' } });
+      require(['vs/editor/editor.main'], function () {
+        openCodeEditor = monaco.editor.create(container, {
+          value: '',
+          language: 'json',
+          theme: 'vs-dark',
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontSize: 12,
+          tabSize: 2,
+          scrollBeyondLastLine: false,
+          folding: true,
+          formatOnPaste: true,
+          wordWrap: 'off',
+        });
+        openCodeEditorReady = true;
+        loadOpenCodeSchema();
+        loadOpenCodeConfig();
+      }, function () {
+        container.innerHTML = '<textarea id="opencode-config-editor-textarea" rows="14" spellcheck="false" class="w-full bg-gray-800 p-3 font-mono text-xs text-gray-200 focus:outline-none" placeholder="Editor failed to load. Using basic editor."></textarea>';
+        openCodeEditorReady = true;
+        loadOpenCodeConfig();
+      });
+    }
+
+    function openCodeEditorValue() {
+      const ta = document.getElementById('opencode-config-editor-textarea');
+      if (ta) return ta.value;
+      if (openCodeEditor && openCodeEditorReady) return openCodeEditor.getValue();
+      return '';
+    }
+
+    function openCodeEditorSetValue(value) {
+      const ta = document.getElementById('opencode-config-editor-textarea');
+      if (ta) { ta.value = value; return; }
+      if (openCodeEditor && openCodeEditorReady) openCodeEditor.setValue(value || '');
+    }
+
+    function formatOpenCodeConfig() {
+      if (!openCodeEditor || !openCodeEditorReady) return;
+      const action = openCodeEditor.getAction('editor.action.formatDocument');
+      if (action) action.run();
+    }
+
+    function loadOpenCodeSchema() {
+      if (typeof monaco === 'undefined' || !monaco.languages?.json?.jsonDefaults) return;
+      fetch('/admin/api/opencode-schema')
+        .then(function (res) { return res.json(); })
+        .then(function (schema) {
+          if (schema && schema.error) throw new Error(schema.error);
+          monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+            validate: true,
+            allowComments: true,
+            schemas: [{
+              uri: 'https://opencode.ai/config.json',
+              fileMatch: ['*'],
+              schema: schema,
+            }],
+          });
+        })
+        .catch(function (err) {
+          console.error('Schema load failed:', err);
+          monaco.languages.json.jsonDefaults.setDiagnosticsOptions({
+            validate: true,
+            allowComments: true,
+            schemas: [],
+          });
+        });
+    }
+
+    async function loadOpenCodeConfig() {
+      const msg = document.getElementById('opencode-config-msg');
       if (msg) msg.textContent = '';
       const data = await fetchAPI('/opencode-config');
       if (data.error) {
@@ -565,10 +643,7 @@ export function getAdminHTML(): string {
         }
         return;
       }
-      if (editor) {
-        editor.value = data.content || '';
-        editor.placeholder = '';
-      }
+      openCodeEditorSetValue(data.content || '');
       const modelEl = document.getElementById('opencode-config-model');
       if (modelEl && data.content) {
         try {
@@ -590,10 +665,14 @@ export function getAdminHTML(): string {
     }
 
     async function saveOpenCodeConfig(restart = false) {
-      const editor = document.getElementById('opencode-config-editor');
       const msg = document.getElementById('opencode-config-msg');
-      if (!editor) return;
-      const content = editor.value;
+      if (!msg) return;
+      const content = openCodeEditorValue();
+      if (!content) {
+        msg.textContent = 'Invalid JSON: content is empty';
+        msg.className = 'text-xs text-red-400';
+        return;
+      }
       try {
         JSON.parse(content);
       } catch (e) {
@@ -1074,6 +1153,7 @@ export function getAdminHTML(): string {
     refreshStatus();
     refreshServices();
     refreshConfig();
+    initOpenCodeEditor();
     refreshPower();
     refreshBilling();
     refreshInstanceType();

@@ -716,6 +716,45 @@ app.post("/admin/api/opencode-config", async (c) => {
   }
 });
 
+// OpenCode config JSON schema, proxied same-origin because opencode.ai sends
+// no Access-Control-Allow-Origin header (browsers cannot fetch it directly).
+// Cached in R2 for 24h to avoid hammering the upstream host.
+const OPENCODE_SCHEMA_KEY = "opencode-schema.json";
+const OPENCODE_SCHEMA_TTL_MS = 24 * 60 * 60 * 1000;
+
+app.get("/admin/api/opencode-schema", async (c) => {
+  try {
+    const bucket = c.env.OPENCODE_CONFIG_R2;
+    const fetchFresh = async () => {
+      const res = await fetch("https://opencode.ai/config.json");
+      if (!res.ok) {
+        throw new Error(`Schema fetch failed: ${res.status} ${res.statusText}`);
+      }
+      const schema = await res.text();
+      if (bucket) {
+        await bucket.put(OPENCODE_SCHEMA_KEY, schema, {
+          httpMetadata: { contentType: "application/json" },
+        });
+      }
+      return c.json(JSON.parse(schema));
+    };
+
+    if (bucket) {
+      const obj = await bucket.get(OPENCODE_SCHEMA_KEY);
+      if (obj) {
+        const uploaded = obj.uploaded ?? new Date(0);
+        const age = Date.now() - uploaded.getTime();
+        if (age < OPENCODE_SCHEMA_TTL_MS) {
+          return c.json(JSON.parse(await obj.text()));
+        }
+      }
+    }
+    return await fetchFresh();
+  } catch (error) {
+    return c.json({ error: error instanceof Error ? error.message : "Unknown error" }, 500);
+  }
+});
+
 // Container instance size (vCPU/RAM/disk). Changing it triggers a rolling
 // rollout via the Cloudflare Containers API - workers do not need a redeploy.
 const CF_API_BASE = "https://api.cloudflare.com/client/v4";
