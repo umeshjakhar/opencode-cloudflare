@@ -50,17 +50,30 @@ if (fs.existsSync(CONFIG_PATH)) {
 const hadProvider = !!(config.provider && config.provider.freellmapi);
 
 config.provider = config.provider || {};
-config.provider.freellmapi = {
-  npm: "@ai-sdk/openai-compatible",
-  name: "FreeLLMAPI",
-  options: {
+
+if (config.provider.freellmapi) {
+  // Provider already present: only refresh apiKey + baseURL from the DB.
+  // Preserve any custom fields the user added via the admin UI (custom
+  // models, context/output limits, etc.) so they survive restarts/rollouts.
+  config.provider.freellmapi.options = {
+    ...(config.provider.freellmapi.options || {}),
     baseURL: `http://127.0.0.1:${PORT}/v1`,
     apiKey: unifiedKey,
-  },
-  models: {
-    auto: { name: "Auto", limit: { context: 128000, output: 32768 } },
-  },
-};
+  };
+} else {
+  // First-time provision: insert minimal provider block.
+  config.provider.freellmapi = {
+    npm: "@ai-sdk/openai-compatible",
+    name: "FreeLLMAPI",
+    options: {
+      baseURL: `http://127.0.0.1:${PORT}/v1`,
+      apiKey: unifiedKey,
+    },
+    models: {
+      auto: { name: "Auto", limit: { context: 128000, output: 32768 } },
+    },
+  };
+}
 
 if (!hadProvider) {
   const prevModel = config.model;
