@@ -25,16 +25,27 @@ if [ -n "$R2_ACCOUNT_ID" ] && [ -n "$R2_BUCKET_NAME" ] \
     export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
     exec tigrisfs --endpoint "$R2_ENDPOINT" -f "$R2_BUCKET_NAME" "$R2_MOUNT"
   ) &
+  TIGRISFS_PID=$!
   sleep 3
 
-  # Verify the mount is actually up
+  # Verify the mount is actually up. tigrisfs can take a while to attach the
+  # FUSE mount on a cold start, so retry patiently (up to ~5 minutes). If the
+  # mount never comes up, fail hard instead of silently booting with ephemeral
+  # storage: ephemeral boot loses sessions/config/keys on the next stop, which
+  # is worse than the container showing as down.
   MOUNTED=0
-  for i in 1 2 3 4 5 6 7 8 9 10; do
+  MOUNT_WAIT_ATTEMPTS=150
+  for ((i = 1; i <= MOUNT_WAIT_ATTEMPTS; i++)); do
     if ls "$R2_MOUNT" >/dev/null 2>&1; then
       MOUNTED=1
       break
     fi
-    echo "Waiting for R2 mount... ($i/10)"
+    # If tigrisfs itself died, waiting longer won't help - fail fast.
+    if ! kill -0 "$TIGRISFS_PID" 2>/dev/null; then
+      echo "R2 mount failed: tigrisfs process exited early (attempt $i)"
+      break
+    fi
+    echo "Waiting for R2 mount... ($i/$MOUNT_WAIT_ATTEMPTS)"
     sleep 2
   done
 
@@ -234,7 +245,10 @@ JSON
       exit 0
     ) &
   else
-    echo "WARNING: R2 mount failed, continuing with ephemeral storage"
+    echo "FATAL: R2 bucket ${R2_BUCKET_NAME} failed to mount after ${MOUNT_WAIT_ATTEMPTS:-150} attempts (~$(( ${MOUNT_WAIT_ATTEMPTS:-150} * 2 ))s)."
+    echo "Refusing to boot with ephemeral storage - sessions/config/provider keys would be lost."
+    echo "Check R2_ACCOUNT_ID / R2_ACCESS_KEY_ID / R2_SECRET_ACCESS_KEY and that the bucket exists."
+    exit 1
   fi
 else
   echo "R2 credentials not configured, using ephemeral storage"
